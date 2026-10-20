@@ -1,0 +1,94 @@
+from datetime import datetime
+from enum import Enum
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+
+from .document import SourceType
+
+
+class JobStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class DiffAction(str, Enum):
+    NEW = "new"
+    MODIFIED = "modified"
+    DELETED = "deleted"
+
+
+class DiffSummary(BaseModel):
+    new: int = Field(default=0, ge=0)
+    modified: int = Field(default=0, ge=0)
+    deleted: int = Field(default=0, ge=0)
+
+    @computed_field
+    @property
+    def total(self) -> int:
+        return self.new + self.modified + self.deleted
+
+
+class ManifestEntry(BaseModel):
+    doc_id: str
+    signature: str
+    source_type: SourceType
+    action: DiffAction
+    source: Optional[str] = None
+
+
+class JobManifest(BaseModel):
+    job_id: str
+    dataset: str
+    created_at: datetime
+    entries: list[ManifestEntry]
+
+
+class BatchReceipt(BaseModel):
+    batch_number: int = Field(ge=1)
+    start_index: int = Field(ge=0)
+    end_index: int = Field(ge=0)
+    item_count: int = Field(ge=0)
+    processed_at: datetime
+
+
+class JobProgress(BaseModel):
+    total_items: int = Field(default=0, ge=0)
+    processed_items: int = Field(default=0, ge=0)
+    completed_batches: int = Field(default=0, ge=0)
+
+    @computed_field
+    @property
+    def ratio(self) -> float:
+        if self.total_items == 0:
+            return 0.0
+        return min(self.processed_items / self.total_items, 1.0)
+
+
+class JobBase(BaseModel):
+    dataset: str
+
+
+class JobCreate(JobBase):
+    pass
+
+
+class JobUpdate(BaseModel):
+    status: Optional[JobStatus] = None
+    progress: Optional[JobProgress] = None
+    error: Optional[str] = None
+
+
+class Job(JobBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    status: JobStatus = JobStatus.PENDING
+    progress: JobProgress = Field(default_factory=JobProgress)
+    error: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
