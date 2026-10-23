@@ -29,6 +29,7 @@ PREFIX = f"supplier-demo/seed-{SEED:04d}/"
 class IntegrationData:
     postgres_config: dict[str, Any] = field(repr=False)
     s3_config: dict[str, Any] = field(repr=False)
+    embed_config: dict[str, Any] = field(repr=False)
     manifest: dict[str, Any]
     objects: tuple[Any, ...] = field(repr=False)
 
@@ -130,6 +131,11 @@ def integration_data() -> IntegrationData:
         "secret_key": env["MINIO_ROOT_PASSWORD"],
         "endpoint": f"http://127.0.0.1:{env.get('MINIO_API_PORT', '9000')}",
     }
+    embed_config = {
+        "base_url": env.get("SAB_EMBED_BASE_URL", "").strip(),
+        "api_key": env.get("SAB_EMBED_API_KEY", "ollama"),
+        "model": env.get("SAB_EMBED_MODEL", "bge-m3"),
+    }
     manifest_path = INTEGRATION / "generated" / f"seed-{SEED:04d}" / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
@@ -150,6 +156,7 @@ def integration_data() -> IntegrationData:
     return IntegrationData(
         postgres_config=db_config,
         s3_config=s3_config,
+        embed_config=embed_config,
         manifest=manifest,
         objects=objects,
     )

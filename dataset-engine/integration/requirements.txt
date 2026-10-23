@@ -2,6 +2,7 @@ boto3
 psycopg[binary]
 pydantic
 python-docx
+openai
 openpyxl
 pypdf
 reportlab

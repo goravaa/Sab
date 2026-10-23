@@ -22,12 +22,20 @@ From `dataset-engine/`, run the full integration suite with visible output using
 python -m pytest integration/tests -v -s
 ```
 
+Live embedding checks use the OpenAI SDK against an OpenAI-compatible endpoint
+such as Ollama. Configure `SAB_EMBED_BASE_URL`, `SAB_EMBED_MODEL`, and
+`SAB_EMBED_API_KEY` in `integration/docker/.env` (see `.env.example`), and pull
+the model first, for example `ollama pull bge-m3`. These checks embed text
+extracted from the generated DOCX and PDF objects in MinIO; they skip when
+`SAB_EMBED_BASE_URL` is empty.
+
 The suite keeps focused contract checks for utilities in `main/` beside the
 connector integration checks under `integration/tests/`. The utility checks
 assert observable outputs for canonicalization, stable IDs and signatures, CSV
 edge cases and stream cleanup, Excel sheet reading, database-row document
 conversion, Markdown/text normalization, DOCX heading/list/table extraction,
-and PDF page extraction. They need no services. Connector checks use pytest
+PDF page extraction, and OpenAI-compatible embedding batching/validation. They
+need no services. Connector checks use pytest
 fixtures to start Postgres and MinIO from the same Compose file, wait until
 both accept connections, run the seed-42 generator once per session, and
 exercise the real connectors. They check row counts and foreign
