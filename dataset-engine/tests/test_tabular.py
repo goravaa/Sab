@@ -1,94 +1,19 @@
 from __future__ import annotations
 
 import io
-from contextlib import contextmanager
-from datetime import date, datetime, time, timezone
-from decimal import Decimal
-from uuid import UUID
 
 import pytest
 from openpyxl import Workbook
 
-from main.connect.object_storage.s3 import SourceObject
-from main.document.structured_data.database import row_to_document as database_row_to_document
 from main.document.structured_data.tabular import (
-    canonical_json,
-    canonicalize,
     iter_tabular_documents,
     make_row,
     normalize_headers,
     row_to_document as tabular_row_to_document,
-    sha256_json,
 )
 from main.schema.document import SourceType
 
-
-class TrackedBytesIO(io.BytesIO):
-    def __init__(self, content: bytes) -> None:
-        super().__init__(content)
-        self.closed_by_connector = False
-
-    def close(self) -> None:
-        self.closed_by_connector = True
-        super().close()
-
-
-class MemoryObjectConnector:
-    """S3Connector-shaped test double that tracks streaming body cleanup."""
-
-    def __init__(self, objects: dict[str, bytes]) -> None:
-        self.objects = objects
-        self.bodies: list[TrackedBytesIO] = []
-
-    @contextmanager
-    def open_object(self, key: str):
-        body = TrackedBytesIO(self.objects[key])
-        self.bodies.append(body)
-        try:
-            yield body
-        finally:
-            body.close()
-
-
-def source(key: str) -> SourceObject:
-    return SourceObject(key=key, size=0)
-
-
-def test_canonicalize_handles_common_scalar_and_nested_types():
-    sample_uuid = UUID("12345678-1234-5678-1234-567812345678")
-    result = canonicalize({
-        "number": Decimal("12.30"),
-        "date": date(2026, 10, 22),
-        "timestamp": datetime(2026, 10, 22, 10, 30, tzinfo=timezone.utc),
-        "time": time(10, 30),
-        "uuid": sample_uuid,
-        "bytes": b"\x00\xff",
-        "items": (1, float("nan"), float("inf")),
-    })
-
-    assert result == {
-        "bytes": {"$bytes": "00ff"},
-        "date": {"$date": "2026-10-22"},
-        "items": [1, None, {"$float": "inf"}],
-        "number": {"$decimal": "12.30"},
-        "time": {"$time": "10:30:00"},
-        "timestamp": {"$datetime": "2026-10-22T10:30:00+00:00"},
-        "uuid": {"$uuid": str(sample_uuid)},
-    }
-
-
-def test_canonical_json_and_hash_ignore_mapping_insertion_order():
-    left = {"z": 1, "nested": {"b": 2, "a": 3}}
-    right = {"nested": {"a": 3, "b": 2}, "z": 1}
-
-    assert canonical_json(left) == canonical_json(right)
-    assert sha256_json(left) == sha256_json(right)
-    assert canonical_json(left) == '{"nested":{"a":3,"b":2},"z":1}'
-
-
-def test_canonicalize_fails_for_unknown_objects_instead_of_stringifying_them():
-    with pytest.raises(TypeError, match="Unsupported value type"):
-        canonicalize(object())
+from support import MemoryObjectConnector, source
 
 
 def test_normalize_headers_makes_blank_duplicate_and_colliding_names_unique():
@@ -143,25 +68,6 @@ def test_tabular_document_uses_row_number_when_id_is_empty_and_requires_configur
             {"id": "C-1"}, namespace="supplier", source_id="a.csv", row_number=2,
             id_column="missing",
         )
-
-
-def test_database_document_identity_uses_primary_key_and_signature_tracks_row():
-    row = {"customer_id": "C-1", "company_name": "Acme", "created_at": date(2026, 1, 2), "payload": b"x"}
-    original = database_row_to_document(
-        row, namespace="supplier", schema="supplier_demo", table="customers",
-        primary_keys=("customer_id",),
-    )
-    updated = database_row_to_document(
-        {**row, "company_name": "Acme Industrial"}, namespace="supplier",
-        schema="supplier_demo", table="customers", primary_keys=("customer_id",),
-    )
-
-    assert original.source_type == SourceType.DB_ROW
-    assert original.doc_id == updated.doc_id
-    assert original.signature != updated.signature
-    assert original.metadata["row"]["created_at"] == "2026-01-02"
-    assert original.metadata["row"]["payload"] == {"$bytes": "78"}
-    assert "customer_id" not in original.raw_content
 
 
 def test_csv_reader_normalizes_headers_skips_blank_rows_and_closes_stream():

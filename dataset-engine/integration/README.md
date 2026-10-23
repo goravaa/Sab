@@ -25,31 +25,33 @@ python -m pytest integration/tests -v -s
 Live embedding checks use the OpenAI SDK against an OpenAI-compatible endpoint
 such as Ollama. Configure `SAB_EMBED_BASE_URL`, `SAB_EMBED_MODEL`, and
 `SAB_EMBED_API_KEY` in `integration/docker/.env` (see `.env.example`), and pull
-the model first, for example `ollama pull bge-m3`. These checks embed text
+the model first, for example `ollama pull all-minilm`. These checks embed text
 extracted from the generated DOCX and PDF objects in MinIO; they skip when
 `SAB_EMBED_BASE_URL` is empty.
 
-The suite keeps focused contract checks for utilities in `main/` beside the
-connector integration checks under `integration/tests/`. The utility checks
-assert observable outputs for canonicalization, stable IDs and signatures, CSV
-edge cases and stream cleanup, Excel sheet reading, database-row document
-conversion, Markdown/text normalization, DOCX heading/list/table extraction,
-PDF page extraction, and OpenAI-compatible embedding batching/validation. They
-need no services. Connector checks use pytest
-fixtures to start Postgres and MinIO from the same Compose file, wait until
-both accept connections, run the seed-42 generator once per session, and
-exercise the real connectors. They check row counts and foreign
-key/object-key relationships, `open_object` across PDF/DOCX/CSV/XLSX, CSV,
-Excel, PDF, and DOCX to Document conversion, and stable Postgres document
-IDs/signatures. The service fixture
-leaves development services running after the test run. The generator is
-deterministic and safe to rerun for this seed.
+Focused contract checks for utilities in `main/` live under `tests/` and need
+no services. They assert observable outputs for canonicalization, stable IDs
+and signatures, CSV edge cases and stream cleanup, Excel sheet reading,
+database-row document conversion, Markdown/text normalization, DOCX
+heading/list/table extraction, PDF page extraction, and OpenAI-compatible
+embedding batching/validation.
 
-Running plain `python -m pytest` executes the suite. For each new main utility
-or processing step, add a focused contract test under `integration/tests/`;
-extend it with fixture-backed connector coverage when the public path crosses
-a real service. Prefer assertions about observable output and cross-source
-links so tests catch data-shape regressions as well as connection failures.
+Connector and live-endpoint checks live under `integration/tests/`. Their
+fixtures start Postgres and MinIO from the same Compose file, wait until both
+accept connections, run the seed-42 generator once per session, and exercise
+the real connectors. They check row counts and foreign key/object-key
+relationships, `open_object` across PDF/DOCX/CSV/XLSX, CSV, Excel, PDF, and
+DOCX to Document conversion, stable Postgres document IDs/signatures, and live
+embeddings from generated files. The service fixture leaves development
+services running after the test run. The generator is deterministic and safe
+to rerun for this seed.
+
+Running plain `python -m pytest` executes both suites. For each new main
+utility or processing step, add a focused contract test under `tests/`; add
+fixture-backed coverage under `integration/tests/` when the public path
+crosses a real service. Prefer assertions about observable output and
+cross-source links so tests catch data-shape regressions as well as connection
+failures.
 
 The script reads credentials from `integration/docker/.env` (or the process
 environment), generates local files under `integration/generated/seed-0042/`,

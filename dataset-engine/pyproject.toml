@@ -1,5 +1,5 @@
 [tool.pytest.ini_options]
-testpaths = ["integration/tests"]
+testpaths = ["tests", "integration/tests"]
 pythonpath = ["."]
 addopts = "-ra"
 markers = [
