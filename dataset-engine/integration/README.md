@@ -13,7 +13,7 @@ From `dataset-engine/`:
 ```sh
 python -m pip install -r integration/requirements.txt
 docker compose --env-file integration/docker/.env -f integration/docker/docker-compose.yaml up -d
-python integration/generate_supplier_dataset.py
+python integration/data/generate_supplier_dataset.py
 ```
 
 To run the integration checks from `dataset-engine/`:

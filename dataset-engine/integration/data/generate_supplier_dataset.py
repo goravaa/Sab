@@ -15,7 +15,8 @@ from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+INTEGRATION_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 import boto3
@@ -31,7 +32,7 @@ from main.connect.object_storage.s3 import S3Connector
 from main.schema.service import DatabaseConfig, S3Config
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = INTEGRATION_ROOT
 ENV_FILE = ROOT / "docker" / ".env"
 OUTPUT_ROOT = ROOT / "generated"
 DB_SCHEMA = "supplier_demo"
