@@ -6,4 +6,6 @@ openai
 openpyxl
 pypdf
 reportlab
+pylance
+pyarrow
 pytest>=7.4

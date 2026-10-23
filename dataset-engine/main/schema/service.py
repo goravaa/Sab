@@ -38,6 +38,17 @@ class S3Config(BaseModel):
     prefix: str = ""
 
 
+class DatasetTarget(S3Config):
+    """User-supplied S3 destination for a dataset's state and Lance data."""
+
+    type: Literal["s3"] = "s3"
+
+    @property
+    def uri(self) -> str:
+        prefix = self.prefix.strip("/")
+        return f"s3://{self.bucket}/{prefix}" if prefix else f"s3://{self.bucket}"
+
+
 ConnectionConfig = Annotated[
     Union[DatabaseConfig, S3Config], Field(discriminator="type")
 ]

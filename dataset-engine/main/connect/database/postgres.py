@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any
 from uuid import uuid4
 
@@ -126,6 +126,41 @@ class PostgresConnector:
                 )
             ).fetchone()
         return int(row["row_count"])
+
+    def fetch_row(
+        self,
+        table: str,
+        key_values: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Fetch one row by primary key, raising KeyError if it no longer exists."""
+
+        if not key_values:
+            raise ValueError("key_values must contain at least one primary key")
+
+        from psycopg import sql
+
+        schema, name = self._qualified_table(table)
+        keys = list(key_values)
+        predicate = sql.SQL(" AND ").join(
+            sql.SQL("{} = %s").format(sql.Identifier(key)) for key in keys
+        )
+        query = sql.SQL("SELECT * FROM {} WHERE {}").format(
+            self._identifier(schema, name),
+            predicate,
+        )
+
+        with self._connect() as connection:
+            row = connection.execute(
+                query,
+                tuple(key_values[key] for key in keys),
+            ).fetchone()
+
+        if row is None:
+            raise KeyError(
+                f"row in {table!r} with key {key_values!r} no longer exists"
+            )
+
+        return row
 
     def iter_rows(self, table: str, *, batch_size: int = 1000) -> Iterator[dict[str, Any]]:
         """Yield table rows in primary-key order using a server-side cursor.

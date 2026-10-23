@@ -24,6 +24,8 @@ class Chunk(BaseModel):
 
     chunk_id: str
     doc_id: str
+    source_id: Optional[str] = None
+    job_id: Optional[str] = None
     source_type: SourceType
     chunk_index: int = Field(ge=0)
     text: str

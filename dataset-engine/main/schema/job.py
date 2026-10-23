@@ -1,10 +1,11 @@
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from .document import SourceType
+from .service import DatasetTarget
 
 
 class JobStatus(str, Enum):
@@ -37,6 +38,7 @@ class ManifestEntry(BaseModel):
     source_type: SourceType
     action: DiffAction
     source: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class JobManifest(BaseModel):
@@ -72,7 +74,9 @@ class JobBase(BaseModel):
 
 
 class JobCreate(JobBase):
-    pass
+    """A BYOB job request: the caller chooses where the dataset lives."""
+
+    target: DatasetTarget
 
 
 class JobUpdate(BaseModel):
@@ -88,6 +92,8 @@ class Job(JobBase):
     status: JobStatus = JobStatus.PENDING
     progress: JobProgress = Field(default_factory=JobProgress)
     error: Optional[str] = None
+    # Safe read-model projection; raw credentials stay out of job responses.
+    target_uri: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     started_at: Optional[datetime] = None
