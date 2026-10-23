@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+testpaths = ["integration/tests"]
+pythonpath = ["."]
+addopts = "-ra"
+markers = [
+    "integration: exercises the real Postgres and S3-compatible Docker services",
+]

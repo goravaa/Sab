@@ -4,3 +4,4 @@ pydantic
 python-docx
 openpyxl
 reportlab
+pytest>=7.4

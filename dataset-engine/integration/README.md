@@ -16,6 +16,26 @@ docker compose --env-file integration/docker/.env -f integration/docker/docker-c
 python integration/generate_supplier_dataset.py
 ```
 
+To run the integration checks from `dataset-engine/`:
+
+```sh
+python -m pytest
+```
+
+Pytest starts the Postgres and MinIO services from the same Compose file, waits
+until both accept connections, runs the seed-42 generator once per test
+session, and exercises the real connectors. It checks row counts and foreign
+key/object-key relationships, `open_object` across PDF/DOCX/CSV/XLSX, CSV and
+Excel row-to-Document conversion, and stable Postgres document IDs/signatures.
+The fixture leaves the development services running after the test run. The
+generator is deterministic and safe to rerun for this seed.
+
+For each new connector, document reader, or processing step, add an integration
+test that exercises its public path against these fixtures, then run
+`python -m pytest` before moving on. Prefer assertions about observable output
+and cross-source links so the tests catch wiring and data-shape regressions as
+well as connection failures.
+
 The script reads credentials from `integration/docker/.env` (or the process
 environment), generates local files under `integration/generated/seed-0042/`,
 upserts rows into the dedicated `supplier_demo` Postgres schema, and uploads
