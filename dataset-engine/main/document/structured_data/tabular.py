@@ -18,112 +18,20 @@ Chunking, embedding, and storage belong to downstream pipeline stages.
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
-import json
-import math
 import tempfile
 
 from collections.abc import Iterator, Mapping, Sequence
-from datetime import date, datetime, time
-from decimal import Decimal
 from typing import Any
-from uuid import UUID
 
 
-from main.schema.document import Document, SourceType
 from main.connect.object_storage.s3 import S3Connector, SourceObject
+from main.document.canonical import canonical_json, canonicalize, sha256_json
+from main.schema.document import Document, SourceType
 
 
 SUPPORTED_EXTENSIONS = frozenset({".csv", ".xlsx", ".xlsm"})
 SIGNATURE_VERSION = 1
-
-
-# ---------------------------------------------------------------------------
-# Serialization
-# ---------------------------------------------------------------------------
-
-def canonicalize(value: Any) -> Any:
-    """Convert common tabular values into deterministic JSON-compatible data.
-
-    This representation is used for document content, metadata, and hashing.
-    """
-
-    if value is None:
-        return None
-
-    if isinstance(value, (str, bool, int)):
-        return value
-
-    if isinstance(value, float):
-        if math.isnan(value):
-            return None
-        if not math.isfinite(value):
-            return {"$float": str(value)}
-        return value
-
-    if isinstance(value, Decimal):
-        if not value.is_finite():
-            return {"$decimal": str(value)}
-        return {"$decimal": str(value)}
-
-    if isinstance(value, datetime):
-        return {"$datetime": value.isoformat()}
-
-    if isinstance(value, date):
-        return {"$date": value.isoformat()}
-
-    if isinstance(value, time):
-        return {"$time": value.isoformat()}
-
-    if isinstance(value, UUID):
-        return {"$uuid": str(value)}
-
-    if isinstance(value, bytes):
-        return {"$bytes": value.hex()}
-
-    if isinstance(value, Mapping):
-        return {
-            str(key): canonicalize(item)
-            for key, item in sorted(
-                value.items(),
-                key=lambda pair: str(pair[0]),
-            )
-        }
-
-    if isinstance(value, (list, tuple)):
-        return [canonicalize(item) for item in value]
-
-    # Handle scalar missing-value types such as pandas.NA without
-    # making pandas a required dependency.
-    if type(value).__name__ in {"NAType", "NaTType"}:
-        return None
-
-    # Fail rather than silently hash an unknown object using an
-    # unstable or lossy string representation.
-    raise TypeError(
-        f"Unsupported tabular value type: {type(value).__qualname__}"
-    )
-
-
-def canonical_json(value: Any) -> str:
-    """Serialize a value deterministically."""
-
-    return json.dumps(
-        canonicalize(value),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
-
-
-def sha256_json(value: Any) -> str:
-    """Return a SHA-256 hex digest of a canonical JSON representation."""
-
-    return hashlib.sha256(
-        canonical_json(value).encode("utf-8")
-    ).hexdigest()
 
 
 # ---------------------------------------------------------------------------

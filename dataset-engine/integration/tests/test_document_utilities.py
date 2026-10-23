@@ -87,7 +87,7 @@ def test_canonical_json_and_hash_ignore_mapping_insertion_order():
 
 
 def test_canonicalize_fails_for_unknown_objects_instead_of_stringifying_them():
-    with pytest.raises(TypeError, match="Unsupported tabular value type"):
+    with pytest.raises(TypeError, match="Unsupported value type"):
         canonicalize(object())
 
 

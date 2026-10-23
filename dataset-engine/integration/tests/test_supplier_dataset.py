@@ -9,6 +9,7 @@ from main.connect.database.postgres import PostgresConnector
 from main.connect.object_storage.s3 import S3Config, S3Connector
 from main.document.structured_data.database import row_to_document as db_row_to_document
 from main.document.structured_data.tabular import iter_tabular_documents
+from main.document.unstructured_data.documents import iter_unstructured_documents
 from main.schema.document import SourceType
 from main.schema.service import DatabaseConfig, S3Config
 
@@ -161,3 +162,31 @@ def test_excel_catalog_and_order_summary_are_readable(connectors, object_by_key,
     assert rows[0].metadata["row"]["sku"].startswith("TOOL-0042-")
     first_order = next(document for document in rows if document.metadata["sheet"] == "Order Summary")
     assert first_order.metadata["row"]["customer_id"].startswith("CUST-0042-")
+
+
+def test_docx_agreement_extracts_headings_and_terms(connectors, object_by_key):
+    _, s3 = connectors
+    source = object_by_key[f"{PREFIX}customers/CUST-0042-000001/agreement.docx"]
+    documents = list(iter_unstructured_documents(s3, source, namespace="supplier-demo"))
+
+    assert len(documents) == 1
+    document = documents[0]
+    assert document.source_type == SourceType.S3_OBJECT
+    assert document.raw_content.startswith("# Customer Supply Agreement")
+    assert "# Commercial terms" in document.raw_content
+    assert "CUST-0042-000001" in document.raw_content
+    assert document.metadata["extension"] == ".docx"
+    assert document.metadata["source_id"] == source.key
+
+
+def test_pdf_invoice_extracts_text_and_page_count(connectors, object_by_key):
+    _, s3 = connectors
+    key = f"{PREFIX}invoices/INV-0042-0000006.pdf"
+    documents = list(iter_unstructured_documents(s3, object_by_key[key], namespace="supplier-demo"))
+
+    assert len(documents) == 1
+    document = documents[0]
+    assert "INVOICE" in document.raw_content
+    assert "INV-0042-0000006" in document.raw_content
+    assert document.metadata["extension"] == ".pdf"
+    assert document.metadata["page_count"] >= 1

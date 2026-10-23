@@ -3,5 +3,6 @@ psycopg[binary]
 pydantic
 python-docx
 openpyxl
+pypdf
 reportlab
 pytest>=7.4
