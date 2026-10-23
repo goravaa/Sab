@@ -149,6 +149,7 @@ activemq-data/
 
 # Environments
 .env
+dataset-engine/integration/generated/
 .envrc
 .venv
 env/

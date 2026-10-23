@@ -1,0 +1,6 @@
+boto3
+psycopg[binary]
+pydantic
+python-docx
+openpyxl
+reportlab

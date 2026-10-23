@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
+from typing import BinaryIO
 from main.schema.service import S3Config
 
 
@@ -69,10 +71,21 @@ class S3Connector:
 
     def read_object(self, key: str) -> bytes:
         """Read the full object body; callers can hash its bytes for a signature."""
+        with self.open_object(key) as body:
+            return body.read()
+
+    @contextmanager
+    def open_object(self, key: str) -> Iterator[BinaryIO]:
+        """Open an object as a streaming body, closing it when the context exits.
+
+        This avoids buffering the whole object in memory. Provider errors
+        propagate to the caller; callers should consume the body inside the
+        ``with`` block.
+        """
         response = self._client().get_object(Bucket=self.config.bucket, Key=key)
         body = response["Body"]
         try:
-            return body.read()
+            yield body
         finally:
             body.close()
 
