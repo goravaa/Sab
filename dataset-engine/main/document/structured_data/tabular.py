@@ -134,19 +134,21 @@ def normalize_headers(headers: Sequence[Any]) -> list[str]:
     """Normalize missing and duplicate column names deterministically."""
 
     normalized: list[str] = []
-    counts: dict[str, int] = {}
+    used: set[str] = set()
 
     for index, value in enumerate(headers, start=1):
-        name = str(value).strip() if value is not None else ""
+        base_name = str(value).strip() if value is not None else ""
 
-        if not name:
-            name = f"column_{index}"
+        if not base_name:
+            base_name = f"column_{index}"
 
-        counts[name] = counts.get(name, 0) + 1
+        name = base_name
+        suffix = 2
+        while name in used:
+            name = f"{base_name}_{suffix}"
+            suffix += 1
 
-        if counts[name] > 1:
-            name = f"{name}_{counts[name]}"
-
+        used.add(name)
         normalized.append(name)
 
     return normalized

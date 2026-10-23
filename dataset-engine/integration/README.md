@@ -16,25 +16,30 @@ docker compose --env-file integration/docker/.env -f integration/docker/docker-c
 python integration/data/generate_supplier_dataset.py
 ```
 
-To run the integration checks from `dataset-engine/`:
+From `dataset-engine/`, run the full integration suite with visible output using:
 
 ```sh
-python -m pytest
+python -m pytest integration/tests -v -s
 ```
 
-Pytest starts the Postgres and MinIO services from the same Compose file, waits
-until both accept connections, runs the seed-42 generator once per test
-session, and exercises the real connectors. It checks row counts and foreign
-key/object-key relationships, `open_object` across PDF/DOCX/CSV/XLSX, CSV and
-Excel row-to-Document conversion, and stable Postgres document IDs/signatures.
-The fixture leaves the development services running after the test run. The
-generator is deterministic and safe to rerun for this seed.
+The suite keeps focused contract checks for utilities in `main/` beside the
+connector integration checks under `integration/tests/`. The utility checks
+assert observable outputs for canonicalization, stable IDs and signatures, CSV
+edge cases and stream cleanup, Excel sheet reading, and database-row document
+conversion. They need no services. Connector checks use pytest fixtures to
+start Postgres and MinIO from the same Compose file, wait until both accept
+connections, run the seed-42 generator once per session, and exercise the real
+connectors. They check row counts and foreign key/object-key relationships,
+`open_object` across PDF/DOCX/CSV/XLSX, CSV and Excel row-to-Document
+conversion, and stable Postgres document IDs/signatures. The service fixture
+leaves development services running after the test run. The generator is
+deterministic and safe to rerun for this seed.
 
-For each new connector, document reader, or processing step, add an integration
-test that exercises its public path against these fixtures, then run
-`python -m pytest` before moving on. Prefer assertions about observable output
-and cross-source links so the tests catch wiring and data-shape regressions as
-well as connection failures.
+Running plain `python -m pytest` executes the suite. For each new main utility
+or processing step, add a focused contract test under `integration/tests/`;
+extend it with fixture-backed connector coverage when the public path crosses
+a real service. Prefer assertions about observable output and cross-source
+links so tests catch data-shape regressions as well as connection failures.
 
 The script reads credentials from `integration/docker/.env` (or the process
 environment), generates local files under `integration/generated/seed-0042/`,
