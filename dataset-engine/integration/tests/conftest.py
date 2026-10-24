@@ -23,6 +23,7 @@ GENERATOR = INTEGRATION / "data" / "generate_supplier_dataset.py"
 SEED = 42
 BUCKET = "sab-integration"
 PREFIX = f"supplier-demo/seed-{SEED:04d}/"
+PIPELINE_BUCKET = "sab-pipeline-e2e"
 
 
 @dataclass
@@ -90,6 +91,56 @@ def wait_for_services(env: dict[str, str], timeout: int = 120) -> None:
             last_error = exc
             time.sleep(1)
     raise RuntimeError(f"Local services did not become ready in {timeout}s: {last_error}")
+
+
+def wait_for_s3(env: dict[str, str], timeout: int = 120):
+    s3_port = int(env.get("MINIO_API_PORT", "9000"))
+    client = boto3.client(
+        "s3",
+        aws_access_key_id=env["MINIO_ROOT_USER"],
+        aws_secret_access_key=env["MINIO_ROOT_PASSWORD"],
+        region_name="us-east-1",
+        endpoint_url=f"http://127.0.0.1:{s3_port}",
+    )
+    deadline = time.monotonic() + timeout
+    last_error: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            client.list_buckets()
+            return client
+        except Exception as exc:
+            last_error = exc
+            time.sleep(1)
+    raise RuntimeError(f"MinIO did not become ready in {timeout}s: {last_error}")
+
+
+@pytest.fixture(scope="session")
+def pipeline_s3() -> dict[str, Any]:
+    if not ENV_FILE.exists():
+        pytest.fail(
+            f"Missing {ENV_FILE}. Create it from {DOCKER_DIR / '.env.example'} first."
+        )
+    env = os.environ.copy()
+    env.update(read_env_file(ENV_FILE))
+
+    result = compose(
+        "up", "-d", "--wait", "--wait-timeout", "120", "minio", env=env,
+    )
+    print(result.stdout)
+    client = wait_for_s3(env)
+
+    try:
+        client.create_bucket(Bucket=PIPELINE_BUCKET)
+    except Exception as exc:
+        code = getattr(exc, "response", {}).get("Error", {}).get("Code")
+        if code not in {"BucketAlreadyOwnedByYou", "BucketAlreadyExists"}:
+            raise
+
+    return {
+        "env": env,
+        "client": client,
+        "bucket": PIPELINE_BUCKET,
+    }
 
 
 @pytest.fixture(scope="session")

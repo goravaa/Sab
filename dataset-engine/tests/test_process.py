@@ -814,6 +814,8 @@ def test_load_env_file_sets_variables_without_overriding_by_default(
         encoding="utf-8",
     )
     monkeypatch.setenv("S3_BUCKET", "already-set")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "existing-key")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "existing-secret")
     monkeypatch.delenv("S3_REGION", raising=False)
 
     loaded = load_env_file(path)
@@ -823,3 +825,5 @@ def test_load_env_file_sets_variables_without_overriding_by_default(
     }
     assert os.environ["S3_BUCKET"] == "already-set"
     assert os.environ["S3_REGION"] == "from-file"
+    assert os.environ["AWS_ACCESS_KEY_ID"] == "existing-key"
+    assert os.environ["AWS_SECRET_ACCESS_KEY"] == "existing-secret"

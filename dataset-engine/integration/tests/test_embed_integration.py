@@ -20,9 +20,10 @@ def test_openai_sdk_embeds_real_files_through_live_endpoint(
     embed_config = integration_data.embed_config
 
     if not embed_config["base_url"]:
-        pytest.skip(
+        pytest.fail(
             "Set SAB_EMBED_BASE_URL, SAB_EMBED_MODEL, and SAB_EMBED_API_KEY "
-            "in integration/docker/.env to run the live embedding test."
+            "in integration/docker/.env; integration tests require the live "
+            "embedding endpoint."
         )
 
     s3_config = integration_data.s3_config
