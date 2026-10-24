@@ -3,6 +3,7 @@
 from typing import Any
 from uuid import uuid4
 
+from api.logging_config import get_logger
 from main.connect.database.postgres import PostgresConnector
 from main.connect.object_storage.s3 import S3Connector
 from main.process.config import DatasetConfig
@@ -13,12 +14,17 @@ from main.process.store import S3DatasetStore
 from main.schema.job import DiffAction, DiffSummary
 from main.schema.service import ConnectionConfig, DatasetTarget
 
+logger = get_logger(__name__)
+
 
 def check_source(config: ConnectionConfig) -> dict[str, Any]:
+    logger.info("connecting source type=%s", config.type)
+
     if config.type == "postgres":
         connector = PostgresConnector(config)
         connector.check_connection()
         tables = connector.list_tables()
+        logger.info("postgres source connected tables=%d", len(tables))
         return {
             "tables": tables,
             "row_count": sum(connector.count_rows(table) for table in tables),
@@ -27,6 +33,7 @@ def check_source(config: ConnectionConfig) -> dict[str, Any]:
     connector = S3Connector(config)
     connector.check_connection()
     count, size = connector.object_count_and_size()
+    logger.info("s3 source connected objects=%d size_bytes=%d", count, size)
     return {"object_count": count, "size_bytes": size}
 
 
@@ -57,10 +64,16 @@ def summarize_diff(entries: list[Any]) -> DiffSummary:
 
 
 def reconcile(dataset: str, config: DatasetConfig, target: DatasetTarget) -> DiffSummary:
+    logger.info(
+        "scanning sources dataset=%s sources=%d",
+        dataset,
+        len(config.sources),
+    )
     store = S3DatasetStore(target, dataset)
     identifiers = load_identifiers(store)
     # Exhaust the scan before build_manifest can infer any deletions.
     items = list(iter_source_items(config))
+    logger.info("source scan completed dataset=%s items=%d", dataset, len(items))
     manifest = build_manifest(
         job_id=f"preview-{uuid4()}",
         dataset=dataset,

@@ -24,3 +24,14 @@ credentials in the POST body, browser clients should read the response stream
 with `fetch()` rather than native `EventSource` (which only supports GET).
 Each progress event contains `progress.processed_items`,
 `progress.total_items`, `progress.completed_batches`, and `progress.ratio`.
+
+Open `http://localhost:8000/` for the plain HTML interface. It supports one
+PostgreSQL or S3 source per indexing run, connection checks, diff previews,
+and live job progress. The page is served directly by FastAPI and has no
+frontend build step.
+
+Logging is configured centrally in `api/logging_config.py` and installed by
+`api/app.py`. Set `SAB_LOG_LEVEL` (default `INFO`) and optionally
+`SAB_LOG_FORMAT` to control output. Every request reuses or receives an
+`X-Request-ID` response header, and request logs include that ID. Request
+bodies and credentials are never logged.

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
-import logging
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from api.logging_config import get_logger
+from api.schemas import JobSubmitRequest
+from api.services.sources import dataset_config, summarize_diff
 from main.process.config import DatasetConfig
 from main.process.identifiers import load_identifiers
 from main.process.runner import build_manifest, load_manifest, run_job, save_manifest
@@ -16,10 +18,7 @@ from main.process.store import S3DatasetStore
 from main.schema.job import JobProgress
 from main.schema.service import DatasetTarget
 
-from api.schemas import JobSubmitRequest
-from api.services.sources import dataset_config, summarize_diff
-
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def store_for(target: DatasetTarget, dataset: str) -> S3DatasetStore:
@@ -37,6 +36,12 @@ def write_status(store: S3DatasetStore, data: dict[str, Any]) -> None:
 def create_job(request: JobSubmitRequest):
     job_id = str(uuid4())
     now = datetime.now(timezone.utc)
+    logger.info(
+        "preparing job job_id=%s dataset=%s sources=%d",
+        job_id,
+        request.dataset,
+        len(request.sources),
+    )
     config = dataset_config(
         request.dataset,
         request.sources,
@@ -55,17 +60,27 @@ def create_job(request: JobSubmitRequest):
         created_at=now,
     )
     save_manifest(store, manifest)
+    diff = summarize_diff(manifest.entries)
     status = {
         "id": job_id,
         "dataset": request.dataset,
         "status": "pending",
         "progress": JobProgress(total_items=len(manifest.entries)).model_dump(mode="json"),
-        "diff": summarize_diff(manifest.entries).model_dump(mode="json"),
+        "diff": diff.model_dump(mode="json"),
         "error": None,
         "created_at": now.isoformat(),
         "updated_at": now.isoformat(),
     }
     write_status(store, status)
+    logger.info(
+        "job prepared job_id=%s dataset=%s entries=%d new=%d modified=%d deleted=%d",
+        job_id,
+        request.dataset,
+        len(manifest.entries),
+        diff.new,
+        diff.modified,
+        diff.deleted,
+    )
     return job_id, config, store, status
 
 
@@ -74,6 +89,7 @@ def run_job_background(job_id: str, config: DatasetConfig) -> None:
     status = json.loads(store.read_bytes(status_key(job_id)) or b"{}")
     status.update(status="running", updated_at=datetime.now(timezone.utc).isoformat())
     write_status(store, status)
+    logger.info("job started job_id=%s dataset=%s", job_id, config.dataset)
     try:
         progress = run_job(job_id=job_id, config=config, target=config.target)
         status.update(
@@ -81,8 +97,15 @@ def run_job_background(job_id: str, config: DatasetConfig) -> None:
             progress=progress.model_dump(mode="json"),
             updated_at=datetime.now(timezone.utc).isoformat(),
         )
+        logger.info(
+            "job completed job_id=%s dataset=%s processed=%d total=%d",
+            job_id,
+            config.dataset,
+            progress.processed_items,
+            progress.total_items,
+        )
     except Exception as exc:
-        logger.exception("Dataset job %s failed", job_id)
+        logger.exception("job failed job_id=%s dataset=%s", job_id, config.dataset)
         status.update(
             status="failed",
             error=str(exc),
