@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 
 from api.logging_config import get_logger
+from api.services.job_lock import DatasetJobLock, JobAlreadyRunning
 from api.schemas import JobLookupRequest, JobResponse, JobSubmitRequest
 from api.services.jobs import (
     create_job,
@@ -38,8 +39,13 @@ def submit_job(
         len(request.sources),
     )
     try:
+        job_lock = DatasetJobLock.acquire()
+    except JobAlreadyRunning as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
         job_id, config, _, status = create_job(request)
     except Exception as exc:
+        job_lock.release()
         logger.warning(
             "job submit rejected dataset=%s error=%s",
             request.dataset,
@@ -48,7 +54,7 @@ def submit_job(
         logger.debug("job submit failure detail", exc_info=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    background_tasks.add_task(run_job_background, job_id, config)
+    background_tasks.add_task(run_job_background, job_id, config, job_lock)
     logger.info("job accepted job_id=%s dataset=%s", job_id, request.dataset)
     return JobResponse.model_validate(status)
 
@@ -58,13 +64,14 @@ def job_stream_response(
     config,
     store,
     initial_status: dict[str, Any],
+    job_lock: DatasetJobLock,
 ) -> StreamingResponse:
     """Return an SSE response that runs and reports one prepared job."""
 
     async def events():
         logger.info("job stream opened job_id=%s dataset=%s", job_id, config.dataset)
         worker = asyncio.create_task(
-            asyncio.to_thread(run_job_background, job_id, config)
+            asyncio.to_thread(run_job_background, job_id, config, job_lock)
         )
         yield _sse("job", JobResponse.model_validate(initial_status).model_dump(mode="json"))
         previous: tuple[int, int] | None = None
@@ -119,8 +126,13 @@ async def submit_job_stream(request: JobSubmitRequest) -> StreamingResponse:
         len(request.sources),
     )
     try:
+        job_lock = DatasetJobLock.acquire()
+    except JobAlreadyRunning as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
         job_id, config, store, initial_status = create_job(request)
     except Exception as exc:
+        job_lock.release()
         logger.warning(
             "job stream rejected dataset=%s error=%s",
             request.dataset,
@@ -129,7 +141,7 @@ async def submit_job_stream(request: JobSubmitRequest) -> StreamingResponse:
         logger.debug("job stream failure detail", exc_info=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return job_stream_response(job_id, config, store, initial_status)
+    return job_stream_response(job_id, config, store, initial_status, job_lock)
 
 
 @router.post("/{job_id}/status", response_model=JobResponse)

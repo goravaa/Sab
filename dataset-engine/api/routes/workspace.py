@@ -8,6 +8,7 @@ from api.logging_config import get_logger
 from api.routes.jobs import job_stream_response
 from api.schemas import JobSubmitRequest
 from api.services.jobs import create_job
+from api.services.job_lock import DatasetJobLock, JobAlreadyRunning
 from api.services.workspace import reconcile_workspace, workspace_status
 from main.process.workspace import (
     WorkspaceConfigError,
@@ -82,11 +83,16 @@ async def stream_workspace_job():
     config = _load()
     request = _job_request(config)
     try:
+        job_lock = DatasetJobLock.acquire()
+    except JobAlreadyRunning as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
         job_id, job_config, store, initial_status = create_job(
             request,
             data_model=config.data_model,
         )
     except Exception as exc:
+        job_lock.release()
         logger.warning(
             "workspace job rejected dataset=%s error=%s",
             config.dataset,
@@ -95,4 +101,4 @@ async def stream_workspace_job():
         logger.debug("workspace job detail", exc_info=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    return job_stream_response(job_id, job_config, store, initial_status)
+    return job_stream_response(job_id, job_config, store, initial_status, job_lock)

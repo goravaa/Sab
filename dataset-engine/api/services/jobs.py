@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from api.logging_config import get_logger
+from api.services.job_lock import DatasetJobLock
 from api.schemas import JobSubmitRequest
 from api.services.sources import dataset_config, summarize_diff
 from main.process.config import DatasetConfig
@@ -89,34 +90,44 @@ def create_job(
     return job_id, config, store, status
 
 
-def run_job_background(job_id: str, config: DatasetConfig) -> None:
-    store = store_for(config.target, config.dataset)  # type: ignore[arg-type]
-    status = json.loads(store.read_bytes(status_key(job_id)) or b"{}")
-    status.update(status="running", updated_at=datetime.now(timezone.utc).isoformat())
-    write_status(store, status)
-    logger.info("job started job_id=%s dataset=%s", job_id, config.dataset)
+def run_job_background(
+    job_id: str,
+    config: DatasetConfig,
+    job_lock: DatasetJobLock | None = None,
+) -> None:
     try:
-        progress = run_job(job_id=job_id, config=config, target=config.target)
-        status.update(
-            status="completed",
-            progress=progress.model_dump(mode="json"),
-            updated_at=datetime.now(timezone.utc).isoformat(),
-        )
-        logger.info(
-            "job completed job_id=%s dataset=%s processed=%d total=%d",
-            job_id,
-            config.dataset,
-            progress.processed_items,
-            progress.total_items,
-        )
-    except Exception as exc:
-        logger.exception("job failed job_id=%s dataset=%s", job_id, config.dataset)
-        status.update(
-            status="failed",
-            error=str(exc),
-            updated_at=datetime.now(timezone.utc).isoformat(),
-        )
-    write_status(store, status)
+        store = store_for(config.target, config.dataset)  # type: ignore[arg-type]
+        status = json.loads(store.read_bytes(status_key(job_id)) or b"{}")
+        status.update(status="running", updated_at=datetime.now(timezone.utc).isoformat())
+        write_status(store, status)
+        if job_lock is not None:
+            job_lock.update({"id": job_id, "dataset": config.dataset, "status": "running"})
+        logger.info("job started job_id=%s dataset=%s", job_id, config.dataset)
+        try:
+            progress = run_job(job_id=job_id, config=config, target=config.target)
+            status.update(
+                status="completed",
+                progress=progress.model_dump(mode="json"),
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+            logger.info(
+                "job completed job_id=%s dataset=%s processed=%d total=%d",
+                job_id,
+                config.dataset,
+                progress.processed_items,
+                progress.total_items,
+            )
+        except Exception as exc:
+            logger.exception("job failed job_id=%s dataset=%s", job_id, config.dataset)
+            status.update(
+                status="failed",
+                error=str(exc),
+                updated_at=datetime.now(timezone.utc).isoformat(),
+            )
+        write_status(store, status)
+    finally:
+        if job_lock is not None:
+            job_lock.release()
 
 
 def load_job_status(store: S3DatasetStore, job_id: str) -> dict[str, Any] | None:

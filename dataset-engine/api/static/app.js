@@ -239,6 +239,12 @@ submitButton.addEventListener("click", async () => {
     const response = await fetch("/v1/workspace/jobs/stream", { method: "POST" });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
+      if (response.status === 409) {
+        $("result-title").textContent = "Indexing already in progress";
+        $("result-badge").textContent = "Busy";
+        $("result-badge").className = "badge running";
+        $("job-message").textContent = error.detail || "Wait for the current job to finish.";
+      }
       throw new Error(error.detail || `Request failed (${response.status})`);
     }
     if (!response.body) throw new Error("This browser does not support streamed responses.");
