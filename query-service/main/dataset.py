@@ -304,6 +304,97 @@ class OpenDataset:
             committed.append(chunk)
         return committed
 
+    def iter_committed_chunks(self, *, batch_size: int = 512):
+        """Yield every committed chunk for SQL, bounded by Lance batches.
+
+        Documents contribute every chunk so the full text can be retrieved.
+        Structured rows contribute only their representative `chunk_index = 0`
+        chunk, preventing a long row from appearing multiple times.
+        """
+        available = self.lance_columns
+        columns = [
+            name for name in (
+                "chunk_id", "doc_id", "source_id", "job_id", "source_type",
+                "table_name", "table_kind", "chunk_index", "text",
+                "header_path", "token_count", "metadata",
+            ) if name in available
+        ]
+        predicates = []
+        if "table_kind" in available:
+            predicates.append("table_kind = 'document'")
+        if "chunk_index" in available:
+            predicates.append("chunk_index = 0")
+        filter_expr = " OR ".join(f"({item})" for item in predicates) or None
+        try:
+            batches = self.lance_dataset.to_batches(
+                columns=columns,
+                filter=filter_expr,
+                batch_size=batch_size,
+                batch_readahead=1,
+                fragment_readahead=1,
+                io_buffer_size=64 * 1024 * 1024,
+            )
+            committed_docs: dict[str, set[str]] = {}
+            for batch in batches:
+                batch_chunks = batch.to_pylist()
+                if self.identifier_store is not None:
+                    batch_source_ids = list({
+                        chunk["source_id"]
+                        for chunk in batch_chunks
+                        if chunk.get("source_id")
+                    })
+                    batch_commits = self.identifier_store.get_many(batch_source_ids)
+                else:
+                    batch_commits = {}
+                for chunk in batch_chunks:
+                    source_id = chunk.get("source_id")
+                    record = (
+                        batch_commits.get(source_id)
+                        if self.identifier_store is not None
+                        else self._identifier(source_id)
+                    )
+                    if not record or chunk.get("job_id") != record.get("job_id"):
+                        continue
+                    if self.identifier_store is None:
+                        if source_id not in committed_docs:
+                            committed_docs[source_id] = set(record.get("doc_ids") or [])
+                        if chunk.get("doc_id") not in committed_docs[source_id]:
+                            continue
+                    if record.get("config_hash") != self.config.get("config_hash"):
+                        continue
+                    metadata = chunk.get("metadata") or "{}"
+                    if isinstance(metadata, str):
+                        try:
+                            metadata = json.loads(metadata)
+                        except ValueError:
+                            metadata = {}
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+                    resolved_name = chunk.get("table_name") or _table_name_from_metadata(metadata)
+                    resolved_kind = chunk.get("table_kind") or _table_kind_from_metadata(metadata, resolved_name)
+                    row = metadata.get("row")
+                    yield {
+                        "chunk_id": chunk.get("chunk_id") or "",
+                        "doc_id": chunk.get("doc_id") or "",
+                        "source_id": source_id or "",
+                        "job_id": chunk.get("job_id") or "",
+                        "source_type": chunk.get("source_type") or "unknown",
+                        "table_name": resolved_name,
+                        "table_kind": resolved_kind,
+                        "namespace": metadata.get("namespace") or "",
+                        "chunk_index": int(chunk.get("chunk_index") or 0),
+                        "text": chunk.get("text") or "",
+                        "header_path": chunk.get("header_path") or [],
+                        "token_count": int(chunk.get("token_count") or 0),
+                        "source_label": metadata.get("source_label"),
+                        "sheet": metadata.get("sheet"),
+                        "row_number": metadata.get("row_number"),
+                        "metadata": metadata,
+                        "row": row if isinstance(row, dict) else None,
+                    }
+        except Exception as exc:
+            raise DatasetError("Could not scan committed chunks") from exc
+
     def structured_rows(self) -> list[dict[str, Any]]:
         """Return de-duplicated structured rows from committed tabular chunks."""
         rows: list[dict[str, Any]] = []

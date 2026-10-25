@@ -1,4 +1,4 @@
-"""Read-only SQL over one logical table, streamed from committed Lance rows."""
+"""Read-only SQL over all committed chunks, streamed from Lance rows."""
 
 from __future__ import annotations
 
@@ -11,20 +11,28 @@ from pathlib import Path
 from typing import Any
 
 from ..dataset import open_dataset
-from .catalog import describe_dataset_table
+from .catalog import _logical_type, _merge_types
 from .dataset import configured_connection
 
 
 MAX_RESULT_ROWS = 100
-_PROVENANCE_TYPES = {
-    "_sab_doc_id": "VARCHAR",
-    "_sab_source_id": "VARCHAR",
-    "_sab_source": "VARCHAR",
-    "_sab_sheet": "VARCHAR",
-    "_sab_row_number": "BIGINT",
-    "_sab_table_name": "VARCHAR",
-    "_sab_table_kind": "VARCHAR",
-    "_sab_namespace": "VARCHAR",
+_COMMON_TYPES = {
+    "chunk_id": "VARCHAR",
+    "doc_id": "VARCHAR",
+    "source_id": "VARCHAR",
+    "job_id": "VARCHAR",
+    "source_type": "VARCHAR",
+    "table_name": "VARCHAR",
+    "table_kind": "VARCHAR",
+    "namespace": "VARCHAR",
+    "chunk_index": "BIGINT",
+    "text": "VARCHAR",
+    "header_path": "LIST",
+    "token_count": "BIGINT",
+    "source": "VARCHAR",
+    "sheet": "VARCHAR",
+    "row_number": "BIGINT",
+    "metadata": "VARCHAR",
 }
 
 
@@ -58,6 +66,12 @@ def _arrow_type(pa: Any, logical_type: str) -> Any:
     }.get(logical_type, pa.string())
 
 
+def _field_type(pa: Any, name: str, logical_type: str) -> Any:
+    if name == "header_path":
+        return pa.list_(pa.string())
+    return _arrow_type(pa, logical_type)
+
+
 def _arrow_value(value: Any, logical_type: str) -> Any:
     if value is None:
         return None
@@ -78,21 +92,88 @@ def _arrow_value(value: Any, logical_type: str) -> Any:
     return str(value)
 
 
-def query_sql(
-    table_name: str,
-    sql: str,
-    table_kind: str | None = None,
-    namespace: str | None = None,
-    limit: int = 50,
-) -> dict:
-    """Run one SELECT against a single catalog table, exposed to SQL as `data`.
+def _row_types(dataset: Any) -> dict[str, str]:
+    columns: dict[str, set[str]] = {}
+    decimal_shapes: dict[str, tuple[int, int]] = {}
+    for entry in dataset.iter_structured_rows():
+        for name, value in entry["row"].items():
+            name = str(name)
+            if name in _COMMON_TYPES:
+                raise ValueError(
+                    f"Source column {name!r} conflicts with a reserved SQL column"
+                )
+            kind = _logical_type(value)
+            if kind:
+                columns.setdefault(name, set()).add(kind)
+                if kind == "BIGINT":
+                    digits = len(str(abs(value)))
+                    previous = decimal_shapes.get(name, (1, 0))
+                    decimal_shapes[name] = (max(previous[0], digits), previous[1])
+                if kind == "DECIMAL":
+                    raw = value.get("$decimal") if isinstance(value, dict) else value
+                    try:
+                        decimal_value = Decimal(str(raw))
+                    except Exception:
+                        decimal_value = None
+                    if decimal_value is not None and decimal_value.is_finite():
+                        observed_scale = max(-decimal_value.as_tuple().exponent, 0)
+                        observed_precision = max(decimal_value.adjusted() + 1, 1) + observed_scale
+                        previous = decimal_shapes.get(name, (1, 0))
+                        decimal_shapes[name] = (
+                            max(previous[0], observed_precision),
+                            max(previous[1], observed_scale),
+                        )
+            else:
+                columns.setdefault(name, set())
+    return {
+        name: _merge_types(
+            types,
+            precision=decimal_shapes.get(name, (1, 0))[0],
+            scale=decimal_shapes.get(name, (1, 0))[1],
+        )
+        for name, types in sorted(columns.items())
+    }
 
-    Lance reads the selected table in bounded batches. The SQL statement must
-    use `FROM data`; the table selector prevents unrelated source schemas from
-    being mixed into the Arrow stream.
+
+def _chunk_values(entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "chunk_id": entry["chunk_id"],
+        "doc_id": entry["doc_id"],
+        "source_id": entry["source_id"],
+        "job_id": entry["job_id"],
+        "source_type": entry["source_type"],
+        "table_name": entry["table_name"],
+        "table_kind": entry["table_kind"],
+        "namespace": entry["namespace"],
+        "chunk_index": entry["chunk_index"],
+        "text": entry["text"],
+        "header_path": list(entry.get("header_path") or []),
+        "token_count": entry["token_count"],
+        "source": entry.get("source_label"),
+        "sheet": entry.get("sheet"),
+        "row_number": entry.get("row_number"),
+        "metadata": json.dumps(
+            entry.get("metadata") or {},
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        ),
+    }
+
+
+def query_sql(sql: str, limit: int = 50) -> dict:
+    """Run one read-only SELECT against all committed chunks exposed as `data`.
+
+    `data` contains `table_name`, `table_kind`, `chunk_index`, `text`, and
+    source provenance for every committed chunk. Structured row fields are
+    also exposed as typed columns. Filter by `table_name` to pull one logical
+    table or all chunks of one document.
+
+    System columns (`chunk_id`, `doc_id`, `source_id`, `job_id`, `source_type`,
+    `namespace`, `source`, `sheet`, `row_number`, `metadata`) are provenance
+    metadata. `metadata` is a large JSON string. Select explicit columns rather
+    than `SELECT *`, and omit metadata columns unless they are needed.
     """
-    if not table_name.strip():
-        raise ValueError("table_name must not be empty")
     if not sql.strip():
         raise ValueError("sql must not be empty")
     if len(sql) > 16_384:
@@ -107,59 +188,32 @@ def query_sql(
         raise RuntimeError("SQL querying requires DuckDB; install query-service requirements") from exc
 
     with open_dataset(configured_connection(), streaming_identifiers=True) as dataset:
-        return _query_open_dataset(
-            dataset,
-            table_name,
-            sql,
-            table_kind,
-            namespace,
-            limit,
-            duckdb,
-            pa,
-        )
+        return _query_open_dataset(dataset, sql, limit, duckdb, pa)
 
 
 def _query_open_dataset(
     dataset: Any,
-    table_name: str,
     sql: str,
-    table_kind: str | None,
-    namespace: str | None,
     limit: int,
     duckdb: Any,
     pa: Any,
 ) -> dict:
-    description = describe_dataset_table(dataset, table_name, table_kind, namespace)
-    identity = (description["table_name"], description["table_kind"], description["namespace"])
-    logical_types = {column["name"]: column["type"] for column in description["columns"]}
-    for name in _PROVENANCE_TYPES:
-        if name in logical_types:
-            raise ValueError(f"Source column {name!r} conflicts with a reserved provenance column")
+    row_types = _row_types(dataset)
     schema = pa.schema(
-        [pa.field(name, _arrow_type(pa, kind)) for name, kind in logical_types.items()]
-        + [pa.field(name, _arrow_type(pa, kind)) for name, kind in _PROVENANCE_TYPES.items()]
+        [pa.field(name, _field_type(pa, name, kind)) for name, kind in _COMMON_TYPES.items()]
+        + [pa.field(name, _arrow_type(pa, kind)) for name, kind in row_types.items()]
     )
 
     def batches():
         pending: list[dict[str, Any]] = []
-        for entry in dataset.iter_structured_rows(
-            table_name=identity[0], table_kind=identity[1], namespace=identity[2],
-        ):
-            row = {
-                name: _arrow_value(entry["row"].get(name), kind)
-                for name, kind in logical_types.items()
-            }
-            row.update({
-                "_sab_doc_id": entry["doc_id"],
-                "_sab_source_id": entry["source_id"],
-                "_sab_source": entry.get("source_label"),
-                "_sab_sheet": entry.get("sheet"),
-                "_sab_row_number": entry.get("row_number"),
-                "_sab_table_name": entry["table_name"],
-                "_sab_table_kind": entry["table_kind"],
-                "_sab_namespace": entry["namespace"],
+        for entry in dataset.iter_committed_chunks():
+            values = _chunk_values(entry)
+            row = entry.get("row") or {}
+            values.update({
+                name: _arrow_value(row.get(name), kind)
+                for name, kind in row_types.items()
             })
-            pending.append(row)
+            pending.append(values)
             if len(pending) >= 512:
                 yield pa.RecordBatch.from_pylist(pending, schema=schema)
                 pending.clear()
@@ -180,7 +234,7 @@ def _query_open_dataset(
     connection = duckdb.connect(database=":memory:")
     try:
         spill_directory = Path(dataset.temp_directory.name) / "duckdb-spill"
-        spill_directory.mkdir()
+        spill_directory.mkdir(exist_ok=True)
         escaped_spill_directory = str(spill_directory).replace("'", "''")
         connection.execute(f"SET memory_limit = '{memory_limit}'")
         connection.execute(f"SET threads = {threads}")
@@ -203,10 +257,7 @@ def _query_open_dataset(
             for values in fetched[:limit]
         ]
         return {
-            "table_name": identity[0],
-            "table_kind": identity[1],
-            "namespace": identity[2],
-            "available_rows": description["row_count"],
+            "available_chunks": dataset.chunk_count,
             "returned_rows": len(rows),
             "truncated": truncated,
             "columns": columns,
