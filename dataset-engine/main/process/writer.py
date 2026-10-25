@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+from main.connect.object_storage.s3 import resolve_s3_credentials
 from main.document.canonical import canonical_json
 from main.schema.document import Chunk
 from main.schema.service import S3Config
@@ -17,10 +18,14 @@ from main.schema.service import S3Config
 def lance_storage_options(config: S3Config) -> dict[str, str]:
     """Translate an S3Config into Lance/object-store options."""
 
+    access_key_id, secret_access_key, session_token = resolve_s3_credentials(config)
     options = {
-        "access_key_id": config.access_key_id,
-        "secret_access_key": config.secret_access_key.get_secret_value(),
+        "access_key_id": access_key_id,
+        "secret_access_key": secret_access_key,
     }
+
+    if session_token:
+        options["session_token"] = session_token
 
     if config.region:
         options["region"] = config.region

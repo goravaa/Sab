@@ -16,7 +16,7 @@ from main.process.runner import build_manifest, load_manifest, run_job, save_man
 from main.process.sources import iter_source_items
 from main.process.store import S3DatasetStore
 from main.schema.job import JobProgress
-from main.schema.service import DatasetTarget
+from main.schema.service import DataModelConfig, DatasetTarget
 
 logger = get_logger(__name__)
 
@@ -33,7 +33,11 @@ def write_status(store: S3DatasetStore, data: dict[str, Any]) -> None:
     store.write_bytes(status_key(data["id"]), json.dumps(data).encode("utf-8"))
 
 
-def create_job(request: JobSubmitRequest):
+def create_job(
+    request: JobSubmitRequest,
+    *,
+    data_model: DataModelConfig | None = None,
+):
     job_id = str(uuid4())
     now = datetime.now(timezone.utc)
     logger.info(
@@ -47,6 +51,7 @@ def create_job(request: JobSubmitRequest):
         request.sources,
         request.target,
         item_batch_size=request.item_batch_size,
+        data_model=data_model,
     )
     store = store_for(request.target, request.dataset)
     identifiers = load_identifiers(store)

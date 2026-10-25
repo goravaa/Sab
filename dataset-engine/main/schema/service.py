@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Annotated, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 
 class ServiceType(str, Enum):
@@ -31,11 +31,27 @@ class DatabaseConfig(BaseModel):
 class S3Config(BaseModel):
     type: Literal["s3"]
     bucket: str
-    access_key_id: str
-    secret_access_key: SecretStr
+    access_key_id: Optional[str] = None
+    secret_access_key: Optional[SecretStr] = None
+    session_token: Optional[SecretStr] = None
+    profile: Optional[str] = None
     region: Optional[str] = None
     endpoint_url: Optional[str] = None
     prefix: str = ""
+
+    @model_validator(mode="after")
+    def _validate_auth(self):
+        has_key = bool(self.access_key_id)
+        has_secret = self.secret_access_key is not None
+        if has_key != has_secret:
+            raise ValueError(
+                "access_key_id and secret_access_key must be provided together"
+            )
+        if self.session_token is not None and not has_key:
+            raise ValueError("session_token requires access_key_id")
+        if self.profile and has_key:
+            raise ValueError("use either profile or access keys, not both")
+        return self
 
 
 class DatasetTarget(S3Config):

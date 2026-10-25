@@ -14,103 +14,81 @@
         <a class="brand" href="/" aria-label="Sab Dataset Engine home">
           <span class="brand-mark">S</span><span>sab<span class="brand-light"> / engine</span></span>
         </a>
-        <span class="api-status"><span class="status-dot"></span> Local workspace</span>
+        <span class="api-status"><span class="status-dot"></span> <span id="api-state">Reading workspace</span></span>
       </header>
 
       <section class="page-head">
         <div class="page-copy">
-          <p class="eyebrow">DATA PIPELINE</p>
-          <h1>Build a dataset</h1>
-          <p class="intro-copy">Point at a source, choose where the index lives, then review what will change.</p>
+          <p class="eyebrow">LOCAL WORKSPACE</p>
+          <h1>Data workspace</h1>
+          <p id="workspace-summary" class="intro-copy">Reading configured sources and target dataset…</p>
+          <div class="trust-row" aria-label="Workspace guarantees">
+            <span id="config-path">config/workspace.yaml</span>
+            <span>Read-only sources</span>
+            <span>Target written only on commit</span>
+          </div>
         </div>
-        <label class="field dataset-field">
-          <span>Dataset name</span>
-          <input id="dataset" name="dataset" placeholder="support-docs" required pattern="[A-Za-z0-9._-]+">
-          <small>Letters, numbers, dots, dashes, and underscores.</small>
-        </label>
+        <div class="workspace-card">
+          <div>
+            <p class="eyebrow">DATASET</p>
+            <strong id="dataset-name">—</strong>
+            <span id="target-short">No target loaded</span>
+          </div>
+          <button id="reload-workspace" class="button secondary" type="button">Reload config</button>
+        </div>
       </section>
 
-      <form id="setup-form" autocomplete="off">
-        <div class="setup-grid">
-          <section class="panel">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">01 · INPUT</p>
-                <h2>Source</h2>
-                <p>Where should we read data from?</p>
-              </div>
-              <span class="panel-tag">Read only</span>
+      <div id="workspace-grid" class="workspace-grid">
+        <section class="panel panel-source">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">01 · SOURCES</p>
+              <h2>Source catalog</h2>
+              <p>Every source in the workspace file contributes to this dataset.</p>
             </div>
+            <span id="source-count" class="panel-tag">0 sources</span>
+          </div>
+          <ul id="source-list" class="source-list" aria-live="polite">
+            <li class="source-empty">Reading workspace…</li>
+          </ul>
+        </section>
 
-            <div class="field-grid">
-              <label class="field">
-                <span>Source type</span>
-                <select id="source-type">
-                  <option value="postgres">PostgreSQL</option>
-                  <option value="s3">S3 bucket</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Source name</span>
-                <input id="source-name" value="primary" required>
-              </label>
+        <section class="panel panel-target">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">02 · TARGET</p>
+              <h2>Dataset bucket</h2>
+              <p>One committed index shared by every configured source.</p>
             </div>
+            <span class="panel-tag">S3</span>
+          </div>
 
-            <div id="postgres-fields" class="source-fields">
-              <div class="field-grid">
-                <label class="field"><span>Host</span><input id="db-host" placeholder="localhost" required></label>
-                <label class="field"><span>Port</span><input id="db-port" type="number" value="5432" min="1" max="65535" required></label>
-              </div>
-              <label class="field"><span>Database</span><input id="db-name" required></label>
-              <div class="field-grid">
-                <label class="field"><span>Username</span><input id="db-user" required></label>
-                <label class="field"><span>Password</span><input id="db-password" type="password" required></label>
-              </div>
-              <label class="field"><span>Tables <em>optional</em></span><input id="db-tables" placeholder="public.customers, public.orders"><small>Leave blank to scan every table with a primary key.</small></label>
-            </div>
+          <div class="target-row">
+            <span>Dataset</span>
+            <strong id="target-dataset">—</strong>
+          </div>
+          <code id="target-uri" class="target-uri">Waiting for workspace config…</code>
+          <div class="target-meta">
+            <span id="target-auth" class="badge">Auth —</span>
+            <span id="target-state" class="inline-result">Checking target…</span>
+          </div>
 
-            <div id="s3-fields" class="source-fields" hidden>
-              <label class="field"><span>Bucket</span><input id="source-bucket" required></label>
-              <label class="field"><span>Prefix <em>optional</em></span><input id="source-prefix" placeholder="documents/"></label>
-              <div class="field-grid">
-                <label class="field"><span>Access key ID</span><input id="source-access" required></label>
-                <label class="field"><span>Secret access key</span><input id="source-secret" type="password" required></label>
-              </div>
-              <div class="field-grid">
-                <label class="field"><span>Region <em>optional</em></span><input id="source-region" placeholder="us-east-1"></label>
-                <label class="field"><span>Endpoint URL <em>optional</em></span><input id="source-endpoint" placeholder="http://localhost:9000"></label>
-              </div>
-            </div>
+          <div class="summary-grid">
+            <div><strong id="indexed-documents">0</strong><span>Indexed docs</span></div>
+            <div><strong id="indexed-items">0</strong><span>Source items</span></div>
+            <div><strong id="orphaned-documents">0</strong><span>Orphaned</span></div>
+          </div>
 
-            <div class="panel-actions">
-              <button id="check-source" class="button secondary" type="button">Test connection</button>
-              <span id="source-result" class="inline-result" role="status"></span>
-            </div>
-          </section>
-
-          <section class="panel">
-            <div class="panel-heading">
-              <div>
-                <p class="eyebrow">02 · OUTPUT</p>
-                <h2>Target</h2>
-                <p>Where should this dataset be stored?</p>
-              </div>
-              <span class="panel-tag">S3</span>
-            </div>
-
-            <label class="field"><span>Bucket</span><input id="target-bucket" required></label>
-            <label class="field"><span>Prefix <em>optional</em></span><input id="target-prefix" placeholder="sab-datasets/"></label>
-            <div class="field-grid">
-              <label class="field"><span>Access key ID</span><input id="target-access" required></label>
-              <label class="field"><span>Secret access key</span><input id="target-secret" type="password" required></label>
-            </div>
-            <div class="field-grid">
-              <label class="field"><span>Region <em>optional</em></span><input id="target-region" placeholder="us-east-1"></label>
-              <label class="field"><span>Endpoint URL <em>optional</em></span><input id="target-endpoint" placeholder="http://localhost:9000"></label>
-            </div>
-            <p class="panel-note">The bucket must already exist. Manifests, progress, and indexed data are written here.</p>
-          </section>
-        </div>
+          <div class="artifacts">
+            <p class="artifacts-title">Index layout</p>
+            <ul class="artifact-list">
+              <li><code>config.json</code><span>Dataset definition</span></li>
+              <li><code>identifiers.parquet</code><span>Commit state</span></li>
+              <li><code>data.lance/</code><span>Embedded chunks</span></li>
+              <li><code>jobs/</code><span>Manifests and progress</span></li>
+            </ul>
+          </div>
+        </section>
 
         <section id="result-panel" class="panel result-panel" aria-live="polite">
           <div class="run-head">
@@ -139,11 +117,12 @@
             <progress id="progress-bar" max="1" value="0">0%</progress>
             <p id="job-message" class="job-message"></p>
           </div>
+          <p class="run-footnote">Source connections are checked from the server. Credentials never reach this page.</p>
         </section>
-      </form>
+      </div>
 
       <p id="error-message" class="error-message" role="alert" hidden></p>
-      <footer>Sab Dataset Engine <span>·</span> Your credentials are never saved by this page.</footer>
+      <footer>Sab Dataset Engine <span>·</span> Edit <code>config/workspace.yaml</code>, then reload.</footer>
     </main>
   </body>
 </html>

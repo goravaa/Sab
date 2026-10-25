@@ -1,0 +1,49 @@
+# Copy this file to config/workspace.yaml, then edit it.
+# config/workspace.yaml is gitignored because it can contain credentials.
+
+dataset: personal
+
+target:
+  bucket: sab-data
+  prefix: sab-datasets
+  region: us-west-2
+  # Leave credential fields out to use the standard AWS chain:
+  # environment variables, ~/.aws/credentials, SSO, or an instance role.
+  # profile: personal
+  # access_key_id: ...
+  # secret_access_key: ...
+
+sources:
+  - name: supplier-db
+    label: Supplier database
+    description: Orders, products, and supplier records from Postgres.
+    connection:
+      type: postgres
+      host: 127.0.0.1
+      port: 5432
+      database: dev_db
+      username: devuser
+      password: change-me
+      tables: []
+
+  - name: supplier-exports
+    label: Supplier exports
+    description: PDFs and spreadsheets exported from the supplier portal.
+    connection:
+      type: s3
+      bucket: sab-data
+      prefix: supplier-demo/
+      region: us-west-2
+      # Omit credentials to use IAM / the AWS credential chain.
+      # access_key_id: ...
+      # secret_access_key: ...
+      # profile: personal
+
+# Optional. Defaults match the engine defaults.
+# data_model:
+#   chunk:
+#     chunk_size: 512
+#     chunk_overlap: 50
+#   embedder:
+#     model: all-minilm
+# item_batch_size: 1000

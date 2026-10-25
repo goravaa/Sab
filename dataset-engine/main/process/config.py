@@ -27,6 +27,8 @@ class SourceConfig(BaseModel):
     """One source system that contributes documents to a dataset."""
 
     name: str = Field(min_length=1)
+    label: str = ""
+    description: str = ""
     connection: ConnectionConfig
     # Source-specific knobs such as ``namespace`` and ``id_column`` for
     # tabular files. Keeping them here avoids adding format-specific fields to

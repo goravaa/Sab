@@ -10,6 +10,68 @@ from typing import BinaryIO
 from main.schema.service import S3Config
 
 
+def _boto3():
+    try:
+        import boto3
+    except ImportError as exc:
+        raise RuntimeError(
+            "S3 support requires boto3; install the 'boto3' package"
+        ) from exc
+    return boto3
+
+
+def s3_session(config: S3Config):
+    boto3 = _boto3()
+    if config.profile:
+        return boto3.Session(profile_name=config.profile)
+    return boto3.Session()
+
+
+def build_s3_client(config: S3Config):
+    """Create a boto3 client, using the AWS chain when keys are omitted."""
+
+    kwargs: dict[str, object] = {
+        "region_name": config.region,
+        "endpoint_url": config.endpoint_url,
+    }
+    if config.access_key_id:
+        kwargs["aws_access_key_id"] = config.access_key_id
+        kwargs["aws_secret_access_key"] = (
+            config.secret_access_key.get_secret_value()
+            if config.secret_access_key is not None
+            else None
+        )
+        if config.session_token is not None:
+            kwargs["aws_session_token"] = config.session_token.get_secret_value()
+
+    return s3_session(config).client("s3", **kwargs)
+
+
+def resolve_s3_credentials(config: S3Config) -> tuple[str, str, str | None]:
+    """Return concrete credentials, resolving the AWS chain when needed."""
+
+    if config.access_key_id:
+        return (
+            config.access_key_id,
+            config.secret_access_key.get_secret_value()
+            if config.secret_access_key is not None
+            else "",
+            config.session_token.get_secret_value()
+            if config.session_token is not None
+            else None,
+        )
+
+    credentials = s3_session(config).get_credentials()
+    if credentials is None:
+        raise RuntimeError(
+            "no AWS credentials found; configure a profile, environment, "
+            "SSO session, or instance role"
+        )
+
+    frozen = credentials.get_frozen_credentials()
+    return frozen.access_key, frozen.secret_key, frozen.token
+
+
 @dataclass(frozen=True)
 class SourceObject:
     """Metadata returned while listing objects in a source bucket."""
@@ -27,21 +89,9 @@ class S3Connector:
         self.config = config
 
     def _client(self):
-        """Create the boto3 client lazily so other connectors need no AWS SDK."""
-        try:
-            import boto3
-        except ImportError as exc:
-            raise RuntimeError(
-                "S3 support requires boto3; install the 'boto3' package"
-            ) from exc
+        """Create a boto3 client lazily so other connectors need no AWS SDK."""
 
-        return boto3.client(
-            "s3",
-            aws_access_key_id=self.config.access_key_id,
-            aws_secret_access_key=self.config.secret_access_key.get_secret_value(),
-            region_name=self.config.region,
-            endpoint_url=self.config.endpoint_url,
-        )
+        return build_s3_client(self.config)
 
     def check_connection(self) -> None:
         """Raise the provider's error if the configured bucket is not accessible."""

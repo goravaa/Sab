@@ -54,7 +54,12 @@ def _source_descriptor(source: SourceConfig) -> dict:
     else:
         connection_data = connection.model_dump(
             mode="json",
-            exclude={"access_key_id", "secret_access_key"},
+            exclude={
+                "access_key_id",
+                "secret_access_key",
+                "session_token",
+                "profile",
+            },
         )
 
     return {

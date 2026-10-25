@@ -1,13 +1,14 @@
 const $ = (id) => document.getElementById(id);
-const sourceType = $("source-type");
-const checkButton = $("check-source");
+const reloadButton = $("reload-workspace");
 const previewButton = $("preview");
 const submitButton = $("submit-job");
 
+let workspace = null;
+
 function setBusy(busy) {
-  checkButton.disabled = busy;
-  previewButton.disabled = busy;
-  submitButton.disabled = busy;
+  reloadButton.disabled = busy;
+  previewButton.disabled = busy || !workspace;
+  submitButton.disabled = busy || !workspace;
 }
 
 function showError(message) {
@@ -16,133 +17,204 @@ function showError(message) {
   target.hidden = !message;
 }
 
-function optional(value) {
-  const trimmed = value.trim();
-  return trimmed || undefined;
+function formatNumber(value) {
+  return Number(value || 0).toLocaleString();
 }
 
-function buildConnection() {
-  if (sourceType.value === "postgres") {
-    const tables = $("db-tables").value.split(",").map((name) => name.trim()).filter(Boolean);
-    const connection = {
-      type: "postgres",
-      host: $("db-host").value.trim(),
-      port: Number($("db-port").value),
-      database: $("db-name").value.trim(),
-      username: $("db-user").value.trim(),
-      password: $("db-password").value,
-    };
-    if (tables.length) connection.tables = tables;
-    return connection;
+function authLabel(mode) {
+  if (mode === "password") return "Password";
+  if (mode === "static") return "Access keys";
+  return "IAM chain";
+}
+
+function sourceAccess(access) {
+  if (!access || access.reachable === null) {
+    return { label: "Not checked", className: "pending" };
   }
-  const connection = {
-    type: "s3",
-    bucket: $("source-bucket").value.trim(),
-    access_key_id: $("source-access").value.trim(),
-    secret_access_key: $("source-secret").value,
-    prefix: $("source-prefix").value.trim(),
-  };
-  const region = optional($("source-region").value);
-  const endpoint = optional($("source-endpoint").value);
-  if (region) connection.region = region;
-  if (endpoint) connection.endpoint_url = endpoint;
-  return connection;
+  if (access.reachable) {
+    return { label: "Accessible", className: "success" };
+  }
+  return { label: "Unavailable", className: "failure" };
 }
 
-function buildTarget() {
-  const target = {
-    type: "s3",
-    bucket: $("target-bucket").value.trim(),
-    access_key_id: $("target-access").value.trim(),
-    secret_access_key: $("target-secret").value,
-    prefix: $("target-prefix").value.trim(),
-  };
-  const region = optional($("target-region").value);
-  const endpoint = optional($("target-endpoint").value);
-  if (region) target.region = region;
-  if (endpoint) target.endpoint_url = endpoint;
-  return target;
+async function getJson(url) {
+  const response = await fetch(url, { headers: { Accept: "application/json" } });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
+  return data;
 }
 
-function buildBody() {
-  const name = $("source-name").value.trim();
-  return {
-    dataset: $("dataset").value.trim(),
-    sources: [{ name, connection: buildConnection(), options: {} }],
-    target: buildTarget(),
-  };
-}
-
-function setSourceType() {
-  const postgres = sourceType.value === "postgres";
-  $("postgres-fields").hidden = !postgres;
-  $("s3-fields").hidden = postgres;
-  $("db-host").required = postgres;
-  $("db-port").required = postgres;
-  $("db-name").required = postgres;
-  $("db-user").required = postgres;
-  $("db-password").required = postgres;
-  $("source-bucket").required = !postgres;
-  $("source-access").required = !postgres;
-  $("source-secret").required = !postgres;
-  $("source-result").textContent = "";
-}
-
-async function postJson(url, body) {
+async function postJson(url) {
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
   return data;
 }
 
-function renderDiff(diff) {
-  $("diff-new").textContent = diff.new ?? 0;
-  $("diff-modified").textContent = diff.modified ?? 0;
-  $("diff-deleted").textContent = diff.deleted ?? 0;
+function resetWorkspaceView(message) {
+  workspace = null;
+  $("dataset-name").textContent = "—";
+  $("target-short").textContent = "No target loaded";
+  $("workspace-summary").textContent = message;
+  $("api-state").textContent = "Config error";
+  $("source-count").textContent = "0 sources";
+  $("source-list").replaceChildren(sourceEmpty(message));
+  $("target-dataset").textContent = "—";
+  $("target-uri").textContent = message;
+  $("target-auth").textContent = "Auth —";
+  $("target-state").textContent = "Waiting for workspace config";
+  $("target-state").className = "inline-result";
+  $("indexed-documents").textContent = "0";
+  $("indexed-items").textContent = "0";
+  $("orphaned-documents").textContent = "0";
+  setBusy(false);
 }
 
-checkButton.addEventListener("click", async () => {
-  showError("");
-  const result = $("source-result");
-  result.className = "inline-result";
-  result.textContent = "Checking…";
-  setBusy(true);
-  try {
-    const data = await postJson("/v1/sources/check", {
-      name: $("source-name").value.trim(),
-      config: buildConnection(),
-    });
-    const info = data.info || {};
-    const summary = info.row_count !== undefined
-      ? `${info.row_count.toLocaleString()} rows · ${(info.tables || []).length} tables`
-      : `${(info.object_count || 0).toLocaleString()} objects · ${formatBytes(info.size_bytes || 0)}`;
-    result.className = "inline-result success";
-    result.textContent = `Connected · ${summary}`;
-  } catch (error) {
-    result.className = "inline-result failure";
-    result.textContent = error.message;
-  } finally {
-    setBusy(false);
+function sourceEmpty(message) {
+  const item = document.createElement("li");
+  item.className = "source-empty";
+  item.textContent = message;
+  return item;
+}
+
+function sourceCard(source) {
+  const access = sourceAccess(source.access);
+  const item = document.createElement("li");
+  item.className = "source-card";
+
+  const head = document.createElement("div");
+  head.className = "source-card-head";
+
+  const identity = document.createElement("div");
+  identity.className = "source-identity";
+
+  const type = document.createElement("span");
+  type.className = "source-type";
+  type.textContent = source.type === "postgres" ? "DB" : "S3";
+
+  const names = document.createElement("div");
+  names.className = "source-names";
+  const label = document.createElement("strong");
+  label.textContent = source.label;
+  const name = document.createElement("span");
+  name.textContent = source.name;
+  names.append(label, name);
+
+  identity.append(type, names);
+
+  const status = document.createElement("span");
+  status.className = `status-pill ${access.className}`;
+  status.textContent = access.label;
+  if (source.access?.error) status.title = source.access.error;
+
+  head.append(identity, status);
+
+  const description = document.createElement("p");
+  description.className = "source-description";
+  description.textContent = source.description || "No description in workspace config.";
+
+  const location = document.createElement("code");
+  location.className = "source-location";
+  location.textContent = source.location;
+
+  const stats = document.createElement("div");
+  stats.className = "source-stats";
+  const docs = document.createElement("span");
+  docs.textContent = `${formatNumber(source.indexed_documents)} docs indexed`;
+  const items = document.createElement("span");
+  items.textContent = `${formatNumber(source.indexed_items)} source ${source.indexed_items === 1 ? "item" : "items"}`;
+  const auth = document.createElement("span");
+  auth.textContent = authLabel(source.auth);
+  stats.append(docs, items, auth);
+
+  item.append(head, description, location, stats);
+  return item;
+}
+
+function renderWorkspace(data) {
+  workspace = data;
+  const target = data.target || {};
+  const status = target.status || {};
+  const sources = data.sources || [];
+
+  $("dataset-name").textContent = data.dataset || "—";
+  $("target-short").textContent = target.uri || "No target";
+  $("workspace-summary").textContent = `${sources.length} configured ${sources.length === 1 ? "source" : "sources"} → ${target.uri || "no target"}`;
+  $("source-count").textContent = `${sources.length} ${sources.length === 1 ? "source" : "sources"}`;
+  $("target-dataset").textContent = data.dataset || "—";
+  $("target-uri").textContent = target.uri || "No target";
+  $("target-auth").textContent = authLabel(target.auth);
+  $("indexed-documents").textContent = formatNumber(status.indexed_documents);
+  $("indexed-items").textContent = formatNumber(status.indexed_items);
+  $("orphaned-documents").textContent = formatNumber(status.orphaned_documents);
+
+  if (status.error) {
+    $("target-state").textContent = "Target unavailable";
+    $("target-state").className = "inline-result failure";
+    $("target-state").title = status.error;
+    $("api-state").textContent = "Target unavailable";
+  } else if (!status.config_present) {
+    $("target-state").textContent = "Not indexed yet";
+    $("target-state").className = "inline-result pending";
+    $("api-state").textContent = "Workspace loaded";
+  } else if (status.definition_changed) {
+    $("target-state").textContent = "Definition changed";
+    $("target-state").className = "inline-result warning";
+    $("api-state").textContent = "Workspace loaded";
+  } else {
+    $("target-state").textContent = "Definition current";
+    $("target-state").className = "inline-result success";
+    $("api-state").textContent = "Workspace loaded";
   }
-});
+
+  const list = $("source-list");
+  list.replaceChildren();
+  if (!sources.length) {
+    list.append(sourceEmpty("No sources configured."));
+  } else {
+    for (const source of sources) list.append(sourceCard(source));
+  }
+
+  setBusy(false);
+}
+
+async function loadWorkspace({ quiet = false } = {}) {
+  if (!quiet) {
+    setBusy(true);
+    $("api-state").textContent = "Checking workspace";
+  }
+  showError("");
+  try {
+    const data = await getJson("/v1/workspace/status");
+    renderWorkspace(data);
+  } catch (error) {
+    resetWorkspaceView(error.message);
+    showError(error.message);
+  }
+}
+
+function renderDiff(diff) {
+  $("diff-new").textContent = formatNumber(diff.new);
+  $("diff-modified").textContent = formatNumber(diff.modified);
+  $("diff-deleted").textContent = formatNumber(diff.deleted);
+}
+
+reloadButton.addEventListener("click", () => loadWorkspace());
 
 previewButton.addEventListener("click", async () => {
+  if (!workspace) return;
   showError("");
-  if (!$("setup-form").reportValidity()) return;
   setBusy(true);
   try {
-    const diff = await postJson("/v1/datasets/reconcile", buildBody());
+    const diff = await postJson("/v1/workspace/reconcile");
     renderDiff(diff);
     $("result-title").textContent = "Changes detected";
     $("result-badge").textContent = "Preview";
     $("result-badge").className = "badge";
     $("progress-area").hidden = true;
-    $("result-panel").hidden = false;
-    $("result-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (error) {
     showError(error.message);
   } finally {
@@ -151,11 +223,9 @@ previewButton.addEventListener("click", async () => {
 });
 
 submitButton.addEventListener("click", async () => {
+  if (!workspace) return;
   showError("");
-  const form = $("setup-form");
-  if (!form.reportValidity()) return;
   setBusy(true);
-  $("result-panel").hidden = false;
   $("progress-area").hidden = false;
   $("result-title").textContent = "Indexing dataset";
   $("result-badge").textContent = "Running";
@@ -163,15 +233,10 @@ submitButton.addEventListener("click", async () => {
   $("progress-bar").value = 0;
   $("progress-value").textContent = "0%";
   $("progress-label").textContent = "Preparing job…";
-  $("job-message").textContent = "Scanning source and preparing batches.";
-  $("result-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  $("job-message").textContent = "Scanning configured sources and preparing batches.";
 
   try {
-    const response = await fetch("/v1/jobs/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildBody()),
-    });
+    const response = await fetch("/v1/workspace/jobs/stream", { method: "POST" });
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
       throw new Error(error.detail || `Request failed (${response.status})`);
@@ -223,8 +288,8 @@ function handleEvent(block) {
     const ratio = Math.min(1, Math.max(0, Number(progress.ratio || 0)));
     $("progress-bar").value = ratio;
     $("progress-value").textContent = `${Math.round(ratio * 100)}%`;
-    $("progress-label").textContent = `${(progress.processed_items || 0).toLocaleString()} of ${(progress.total_items || 0).toLocaleString()} items`;
-    $("job-message").textContent = `${progress.completed_batches || 0} batches completed.`;
+    $("progress-label").textContent = `${formatNumber(progress.processed_items)} of ${formatNumber(progress.total_items)} items`;
+    $("job-message").textContent = `${formatNumber(progress.completed_batches)} batches completed.`;
     return;
   }
   if (eventName === "completed") {
@@ -235,8 +300,9 @@ function handleEvent(block) {
     const progress = data.progress || {};
     $("progress-bar").value = 1;
     $("progress-value").textContent = "100%";
-    $("progress-label").textContent = `${(progress.processed_items || 0).toLocaleString()} of ${(progress.total_items || 0).toLocaleString()} items`;
-    $("job-message").textContent = "Your dataset is ready to query.";
+    $("progress-label").textContent = `${formatNumber(progress.processed_items)} of ${formatNumber(progress.total_items)} items`;
+    $("job-message").textContent = "The dataset is ready to query.";
+    loadWorkspace({ quiet: true });
     return;
   }
   if (eventName === "failed") {
@@ -248,17 +314,4 @@ function handleEvent(block) {
   }
 }
 
-function formatBytes(bytes) {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let size = bytes / 1024;
-  let unit = units[0];
-  for (let index = 1; size >= 1024 && index < units.length; index += 1) {
-    size /= 1024;
-    unit = units[index];
-  }
-  return `${size.toFixed(1)} ${unit}`;
-}
-
-sourceType.addEventListener("change", setSourceType);
-setSourceType();
+loadWorkspace();

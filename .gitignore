@@ -220,3 +220,7 @@ __marimo__/
 s3.yaml
 .env
 thoughts/
+
+# Local workspace credentials
+dataset-engine/config/workspace.yaml
+dataset-engine/config/*.local.yaml

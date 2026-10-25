@@ -11,6 +11,7 @@ from api.routes.health import router as health_router
 from api.routes.jobs import router as jobs_router
 from api.routes.sources import router as sources_router
 from api.routes.ui import router as ui_router
+from api.routes.workspace import router as workspace_router
 
 app = FastAPI(title="Sab Dataset Engine", version="1.0.0")
 install_logging(app)
@@ -23,3 +24,4 @@ app.include_router(health_router)
 app.include_router(sources_router)
 app.include_router(datasets_router)
 app.include_router(jobs_router)
+app.include_router(workspace_router)

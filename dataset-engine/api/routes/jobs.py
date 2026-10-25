@@ -53,28 +53,19 @@ def submit_job(
     return JobResponse.model_validate(status)
 
 
-@router.post("/stream")
-async def submit_job_stream(request: JobSubmitRequest) -> StreamingResponse:
-    """Submit a job and stream receipt-backed progress as SSE."""
-    logger.info(
-        "job stream requested dataset=%s sources=%d",
-        request.dataset,
-        len(request.sources),
-    )
-    try:
-        job_id, config, store, initial_status = create_job(request)
-    except Exception as exc:
-        logger.warning(
-            "job stream rejected dataset=%s error=%s",
-            request.dataset,
-            type(exc).__name__,
-        )
-        logger.debug("job stream failure detail", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+def job_stream_response(
+    job_id: str,
+    config,
+    store,
+    initial_status: dict[str, Any],
+) -> StreamingResponse:
+    """Return an SSE response that runs and reports one prepared job."""
 
     async def events():
-        logger.info("job stream opened job_id=%s dataset=%s", job_id, request.dataset)
-        worker = asyncio.create_task(asyncio.to_thread(run_job_background, job_id, config))
+        logger.info("job stream opened job_id=%s dataset=%s", job_id, config.dataset)
+        worker = asyncio.create_task(
+            asyncio.to_thread(run_job_background, job_id, config)
+        )
         yield _sse("job", JobResponse.model_validate(initial_status).model_dump(mode="json"))
         previous: tuple[int, int] | None = None
         last_heartbeat = asyncio.get_running_loop().time()
@@ -101,7 +92,10 @@ async def submit_job_stream(request: JobSubmitRequest) -> StreamingResponse:
                     job_id,
                     status["status"],
                 )
-                yield _sse(status["status"], JobResponse.model_validate(status).model_dump(mode="json"))
+                yield _sse(
+                    status["status"],
+                    JobResponse.model_validate(status).model_dump(mode="json"),
+                )
                 break
 
             now = asyncio.get_running_loop().time()
@@ -114,6 +108,28 @@ async def submit_job_stream(request: JobSubmitRequest) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/stream")
+async def submit_job_stream(request: JobSubmitRequest) -> StreamingResponse:
+    """Submit a job and stream receipt-backed progress as SSE."""
+    logger.info(
+        "job stream requested dataset=%s sources=%d",
+        request.dataset,
+        len(request.sources),
+    )
+    try:
+        job_id, config, store, initial_status = create_job(request)
+    except Exception as exc:
+        logger.warning(
+            "job stream rejected dataset=%s error=%s",
+            request.dataset,
+            type(exc).__name__,
+        )
+        logger.debug("job stream failure detail", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return job_stream_response(job_id, config, store, initial_status)
 
 
 @router.post("/{job_id}/status", response_model=JobResponse)

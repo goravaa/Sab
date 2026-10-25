@@ -12,6 +12,7 @@ import mimetypes
 from collections.abc import Iterator
 from typing import Protocol
 
+from main.connect.object_storage.s3 import build_s3_client
 from main.schema.service import S3Config
 
 
@@ -46,20 +47,7 @@ class S3DatasetStore:
         if self._client_instance is not None:
             return self._client_instance
 
-        try:
-            import boto3
-        except ImportError as exc:
-            raise RuntimeError(
-                "Dataset storage requires boto3; install the 'boto3' package"
-            ) from exc
-
-        self._client_instance = boto3.client(
-            "s3",
-            aws_access_key_id=self.config.access_key_id,
-            aws_secret_access_key=self.config.secret_access_key.get_secret_value(),
-            region_name=self.config.region,
-            endpoint_url=self.config.endpoint_url,
-        )
+        self._client_instance = build_s3_client(self.config)
         return self._client_instance
 
     def _key(self, relative_key: str) -> str:
