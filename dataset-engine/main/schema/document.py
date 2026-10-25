@@ -27,6 +27,8 @@ class Chunk(BaseModel):
     source_id: Optional[str] = None
     job_id: Optional[str] = None
     source_type: SourceType
+    table_name: str = ""
+    table_kind: str = "document"
     chunk_index: int = Field(ge=0)
     text: str
     header_path: Optional[list[str]] = None

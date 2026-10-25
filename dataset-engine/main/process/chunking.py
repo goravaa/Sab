@@ -137,6 +137,36 @@ def _pack_units(units: list[str], max_words: int, overlap: int) -> list[str]:
     return chunks
 
 
+def _table_identity(
+    document: Document,
+    source_id: str | None,
+    source_label: str | None,
+) -> tuple[str, str]:
+    schema = document.metadata.get("schema")
+    table = document.metadata.get("table")
+
+    if table:
+        name = f"{schema}.{table}" if schema else str(table)
+        return name, "postgres_table"
+
+    key = str(
+        source_label
+        or document.metadata.get("source_id")
+        or source_id
+        or document.doc_id
+    )
+    lowered = key.lower()
+
+    if lowered.endswith(".csv"):
+        return key, "csv"
+
+    if lowered.endswith((".xlsx", ".xlsm")):
+        sheet = document.metadata.get("sheet")
+        return (f"{key}::{sheet}" if sheet else key), "xlsx"
+
+    return key, "document"
+
+
 def _source_label(
     document: Document,
     source_id: str | None,
@@ -171,6 +201,7 @@ def chunk_document(
     max_words = max(config.chunk_size, 1)
     overlap = min(max(config.chunk_overlap, 0), max(max_words - 1, 0))
     label = _source_label(document, source_id, source_label)
+    table_name, table_kind = _table_identity(document, source_id, source_label)
 
     chunks: list[Chunk] = []
 
@@ -198,6 +229,8 @@ def chunk_document(
                 source_id=source_id or document.metadata.get("source_id"),
                 job_id=job_id,
                 source_type=document.source_type,
+                table_name=table_name,
+                table_kind=table_kind,
                 chunk_index=chunk_index,
                 text=text,
                 header_path=section.header_path or None,
