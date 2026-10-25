@@ -10,6 +10,10 @@ smallest useful result. Sab does not host or call a chat model.
   chunks, and embedding model.
 - `audit_integrity` — compare committed identifiers with visible Lance chunks;
   report missing documents/chunks, duplicates, and ignored stale/orphan chunks.
+- `list_tables` — list the committed logical structured tables identified by
+  Lance `table_name` and `table_kind` columns, with namespace, row count, and
+  field names.
+- `describe_table` — inspect one table's columns and observed value types.
 - `keyword_search` — literal, case-insensitive keyword search over committed
   chunk text and tabular values. It scans the index without computing query
   embeddings and returns a bounded set of source-cited matches.
@@ -21,9 +25,14 @@ smallest useful result. Sab does not host or call a chat model.
 - `analyze_rows` — exact `count`, `sum`, `avg`, `min`, or `max`, optionally
   grouped by a field and filtered by one condition. Aggregation runs in Sab and
   returns compact numbers instead of sending all matching rows to the model.
-- `query_sql` — run one read-only SQL `SELECT` over committed structured rows
-  exposed as table `data`. Use normal `WHERE`, `ORDER BY`, `GROUP BY`, joins,
-  and aggregates; results are capped at 100 rows. `_sab_doc_id`,
+- `query_sql` — run one read-only SQL `SELECT` against a selected logical
+  table. Pass its `table_name`, `table_kind`, and `namespace` from the catalog;
+  the selected table is exposed to SQL as `data`. Lance yields committed rows
+  to DuckDB in batches. The commit manifest is copied to temporary disk and
+  indexed in SQLite rather than retained as a Python dictionary. DuckDB uses a
+  512 MB memory limit by default and spills larger intermediate results to its
+  temporary directory. Set `SAB_SQL_MEMORY_LIMIT` and `SAB_SQL_THREADS` to tune
+  those defaults. Results are capped at 100 rows. `_sab_doc_id`,
   `_sab_source_id`, `_sab_source`, `_sab_sheet`, and `_sab_row_number` provide
   source references.
 
@@ -34,9 +43,14 @@ questions, use `analyze_rows` so totals and counts are calculated over the data.
 All search and row operations use only chunks whose `source_id`, `job_id`,
 `doc_id`, and `config_hash` match committed `identifiers.parquet` state.
 Structured operations read `metadata.row` from committed tabular chunks; they
-do not infer numeric values from natural-language text. SQL runs in an isolated
-in-memory DuckDB connection with external file access disabled; it cannot query
-arbitrary S3 paths or alter the dataset.
+do not infer numeric values from natural-language text. SQL parses and presents
+one logical table at a time, so similarly named columns from unrelated sources
+cannot collide. Lance input is read in bounded batches; SQL operators such as
+large sorts and high-cardinality grouping can require substantial temporary
+disk space and take longer. The manifest and DuckDB spill files use the system
+temporary directory, so SQL queries need available local disk space. SQL runs
+in an isolated DuckDB connection with external file access disabled;
+it cannot query arbitrary S3 paths or alter the dataset.
 
 ## Configure and run
 
