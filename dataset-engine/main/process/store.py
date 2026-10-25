@@ -116,12 +116,16 @@ class S3DatasetStore:
     def list_keys(self, prefix: str = "") -> Iterator[str]:
         paginator = self._client().get_paginator("list_objects_v2")
         full_prefix = self._key(prefix)
+        root_prefix = f"{self.root}/" if self.root else ""
         for page in paginator.paginate(
             Bucket=self.config.bucket,
             Prefix=full_prefix,
         ):
             for item in page.get("Contents", []):
-                yield item["Key"]
+                key = item["Key"]
+                if root_prefix and key.startswith(root_prefix):
+                    key = key[len(root_prefix):]
+                yield key
 
 
 class MemoryDatasetStore:

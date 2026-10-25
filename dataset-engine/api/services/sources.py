@@ -1,5 +1,7 @@
 """Source connection checks and reconciliation operations."""
 
+import os
+
 from typing import Any
 from uuid import uuid4
 
@@ -12,7 +14,12 @@ from main.process.runner import build_manifest
 from main.process.sources import iter_source_items
 from main.process.store import S3DatasetStore
 from main.schema.job import DiffAction, DiffSummary
-from main.schema.service import ConnectionConfig, DatasetTarget
+from main.schema.service import (
+    ConnectionConfig,
+    DataModelConfig,
+    DatasetTarget,
+    EmbedderConfig,
+)
 
 logger = get_logger(__name__)
 
@@ -43,11 +50,20 @@ def dataset_config(
     target: DatasetTarget,
     *,
     item_batch_size: int = 1000,
+    data_model: DataModelConfig | None = None,
 ) -> DatasetConfig:
+    if data_model is None:
+        model = os.getenv("SAB_EMBED_MODEL", "").strip()
+        data_model = (
+            DataModelConfig(embedder=EmbedderConfig(model=model))
+            if model
+            else DataModelConfig()
+        )
     return DatasetConfig(
         dataset=dataset,
         sources=sources,
         target=target,
+        data_model=data_model,
         item_batch_size=item_batch_size,
     )
 

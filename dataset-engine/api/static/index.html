@@ -17,112 +17,131 @@
         <span class="api-status"><span class="status-dot"></span> Local workspace</span>
       </header>
 
-      <section class="intro">
-        <p class="eyebrow">DATA PIPELINE</p>
-        <h1>Index a dataset</h1>
-        <p class="intro-copy">Connect a source, review what changed, and send it to your dataset bucket.</p>
+      <section class="page-head">
+        <div class="page-copy">
+          <p class="eyebrow">DATA PIPELINE</p>
+          <h1>Build a dataset</h1>
+          <p class="intro-copy">Point at a source, choose where the index lives, then review what will change.</p>
+        </div>
+        <label class="field dataset-field">
+          <span>Dataset name</span>
+          <input id="dataset" name="dataset" placeholder="support-docs" required pattern="[A-Za-z0-9._-]+">
+          <small>Letters, numbers, dots, dashes, and underscores.</small>
+        </label>
       </section>
 
       <form id="setup-form" autocomplete="off">
-        <section class="panel">
-          <div class="panel-heading">
-            <span class="step">01</span>
-            <div><h2>Dataset</h2><p>Choose a name for this index.</p></div>
-          </div>
-          <label class="field compact-field">
-            <span>Dataset name</span>
-            <input id="dataset" name="dataset" placeholder="support-docs" required pattern="[A-Za-z0-9._-]+">
-            <small>Letters, numbers, dots, dashes, and underscores.</small>
-          </label>
-        </section>
-
-        <section class="panel">
-          <div class="panel-heading">
-            <span class="step">02</span>
-            <div><h2>Source</h2><p>Credentials are sent to the API for this request only.</p></div>
-          </div>
-          <label class="field compact-field">
-            <span>Source type</span>
-            <select id="source-type">
-              <option value="postgres">PostgreSQL</option>
-              <option value="s3">S3 bucket</option>
-            </select>
-          </label>
-          <label class="field compact-field">
-            <span>Source name</span>
-            <input id="source-name" value="primary" required>
-          </label>
-
-          <div id="postgres-fields" class="source-fields">
-            <div class="field-grid">
-              <label class="field"><span>Host</span><input id="db-host" placeholder="localhost" required></label>
-              <label class="field"><span>Port</span><input id="db-port" type="number" value="5432" min="1" max="65535" required></label>
+        <div class="setup-grid">
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">01 · INPUT</p>
+                <h2>Source</h2>
+                <p>Where should we read data from?</p>
+              </div>
+              <span class="panel-tag">Read only</span>
             </div>
-            <label class="field"><span>Database</span><input id="db-name" required></label>
-            <div class="field-grid">
-              <label class="field"><span>Username</span><input id="db-user" required></label>
-              <label class="field"><span>Password</span><input id="db-password" type="password" required></label>
-            </div>
-            <label class="field"><span>Tables <em>optional</em></span><input id="db-tables" placeholder="public.customers, public.orders"><small>Leave blank to scan every table with a primary key.</small></label>
-          </div>
 
-          <div id="s3-fields" class="source-fields" hidden>
-            <label class="field"><span>Bucket</span><input id="source-bucket" required></label>
-            <label class="field"><span>Prefix <em>optional</em></span><input id="source-prefix" placeholder="documents/"></label>
             <div class="field-grid">
-              <label class="field"><span>Access key ID</span><input id="source-access" required></label>
-              <label class="field"><span>Secret access key</span><input id="source-secret" type="password" required></label>
+              <label class="field">
+                <span>Source type</span>
+                <select id="source-type">
+                  <option value="postgres">PostgreSQL</option>
+                  <option value="s3">S3 bucket</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Source name</span>
+                <input id="source-name" value="primary" required>
+              </label>
+            </div>
+
+            <div id="postgres-fields" class="source-fields">
+              <div class="field-grid">
+                <label class="field"><span>Host</span><input id="db-host" placeholder="localhost" required></label>
+                <label class="field"><span>Port</span><input id="db-port" type="number" value="5432" min="1" max="65535" required></label>
+              </div>
+              <label class="field"><span>Database</span><input id="db-name" required></label>
+              <div class="field-grid">
+                <label class="field"><span>Username</span><input id="db-user" required></label>
+                <label class="field"><span>Password</span><input id="db-password" type="password" required></label>
+              </div>
+              <label class="field"><span>Tables <em>optional</em></span><input id="db-tables" placeholder="public.customers, public.orders"><small>Leave blank to scan every table with a primary key.</small></label>
+            </div>
+
+            <div id="s3-fields" class="source-fields" hidden>
+              <label class="field"><span>Bucket</span><input id="source-bucket" required></label>
+              <label class="field"><span>Prefix <em>optional</em></span><input id="source-prefix" placeholder="documents/"></label>
+              <div class="field-grid">
+                <label class="field"><span>Access key ID</span><input id="source-access" required></label>
+                <label class="field"><span>Secret access key</span><input id="source-secret" type="password" required></label>
+              </div>
+              <div class="field-grid">
+                <label class="field"><span>Region <em>optional</em></span><input id="source-region" placeholder="us-east-1"></label>
+                <label class="field"><span>Endpoint URL <em>optional</em></span><input id="source-endpoint" placeholder="http://localhost:9000"></label>
+              </div>
+            </div>
+
+            <div class="panel-actions">
+              <button id="check-source" class="button secondary" type="button">Test connection</button>
+              <span id="source-result" class="inline-result" role="status"></span>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">02 · OUTPUT</p>
+                <h2>Target</h2>
+                <p>Where should this dataset be stored?</p>
+              </div>
+              <span class="panel-tag">S3</span>
+            </div>
+
+            <label class="field"><span>Bucket</span><input id="target-bucket" required></label>
+            <label class="field"><span>Prefix <em>optional</em></span><input id="target-prefix" placeholder="sab-datasets/"></label>
+            <div class="field-grid">
+              <label class="field"><span>Access key ID</span><input id="target-access" required></label>
+              <label class="field"><span>Secret access key</span><input id="target-secret" type="password" required></label>
             </div>
             <div class="field-grid">
-              <label class="field"><span>Region <em>optional</em></span><input id="source-region" placeholder="us-east-1"></label>
-              <label class="field"><span>Endpoint URL <em>optional</em></span><input id="source-endpoint" placeholder="http://localhost:9000"></label>
+              <label class="field"><span>Region <em>optional</em></span><input id="target-region" placeholder="us-east-1"></label>
+              <label class="field"><span>Endpoint URL <em>optional</em></span><input id="target-endpoint" placeholder="http://localhost:9000"></label>
             </div>
-          </div>
-          <div class="actions left-actions">
-            <button id="check-source" class="button secondary" type="button">Test connection</button>
-            <span id="source-result" class="inline-result" role="status"></span>
-          </div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-heading">
-            <span class="step">03</span>
-            <div><h2>Dataset storage</h2><p>Where manifests, progress, and indexed data are kept.</p></div>
-          </div>
-          <label class="field"><span>Bucket</span><input id="target-bucket" required></label>
-          <label class="field"><span>Prefix <em>optional</em></span><input id="target-prefix" placeholder="sab-datasets/"></label>
-          <div class="field-grid">
-            <label class="field"><span>Access key ID</span><input id="target-access" required></label>
-            <label class="field"><span>Secret access key</span><input id="target-secret" type="password" required></label>
-          </div>
-          <div class="field-grid">
-            <label class="field"><span>Region <em>optional</em></span><input id="target-region" placeholder="us-east-1"></label>
-            <label class="field"><span>Endpoint URL <em>optional</em></span><input id="target-endpoint" placeholder="http://localhost:9000"></label>
-          </div>
-        </section>
-
-        <div class="actions submit-actions">
-          <button id="preview" class="button secondary" type="button">Preview changes</button>
-          <button id="submit-job" class="button primary" type="button">Start indexing <span aria-hidden="true">→</span></button>
+            <p class="panel-note">The bucket must already exist. Manifests, progress, and indexed data are written here.</p>
+          </section>
         </div>
+
+        <section id="result-panel" class="panel result-panel" aria-live="polite">
+          <div class="run-head">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">03 · RUN</p>
+                <h2 id="result-title">Preview your changes</h2>
+                <p>Check what is new, changed, or missing before indexing.</p>
+              </div>
+            </div>
+            <div class="actions">
+              <span id="result-badge" class="badge">Idle</span>
+              <button id="preview" class="button secondary" type="button">Preview changes</button>
+              <button id="submit-job" class="button primary" type="button">Start indexing <span aria-hidden="true">→</span></button>
+            </div>
+          </div>
+
+          <div class="diff-grid">
+            <div class="diff-new"><strong id="diff-new">0</strong><span>New</span></div>
+            <div class="diff-modified"><strong id="diff-modified">0</strong><span>Modified</span></div>
+            <div class="diff-deleted"><strong id="diff-deleted">0</strong><span>Deleted</span></div>
+          </div>
+
+          <div id="progress-area" class="progress-area" hidden>
+            <div class="progress-meta"><span id="progress-label">Preparing job…</span><span id="progress-value">0%</span></div>
+            <progress id="progress-bar" max="1" value="0">0%</progress>
+            <p id="job-message" class="job-message"></p>
+          </div>
+        </section>
       </form>
 
-      <section id="result-panel" class="panel result-panel" hidden aria-live="polite">
-        <div class="result-heading">
-          <div><p class="eyebrow">RECONCILIATION</p><h2 id="result-title">Changes detected</h2></div>
-          <span id="result-badge" class="badge">Preview</span>
-        </div>
-        <div class="diff-grid">
-          <div><strong id="diff-new">0</strong><span>New</span></div>
-          <div><strong id="diff-modified">0</strong><span>Modified</span></div>
-          <div><strong id="diff-deleted">0</strong><span>Deleted</span></div>
-        </div>
-        <div id="progress-area" class="progress-area" hidden>
-          <div class="progress-meta"><span id="progress-label">Preparing job…</span><span id="progress-value">0%</span></div>
-          <progress id="progress-bar" max="1" value="0">0%</progress>
-          <p id="job-message" class="job-message"></p>
-        </div>
-      </section>
       <p id="error-message" class="error-message" role="alert" hidden></p>
       <footer>Sab Dataset Engine <span>·</span> Your credentials are never saved by this page.</footer>
     </main>
