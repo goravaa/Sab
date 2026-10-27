@@ -1,0 +1,21 @@
+services:
+  dataset-engine:
+    image: ${DATASET_ENGINE_IMAGE:-sab-dataset-engine:local}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${DATASET_ENGINE_BIND:-127.0.0.1}:${DATASET_ENGINE_PORT:-8000}:8000"
+    environment:
+      SAB_WORKSPACE: /app/config/workspace.yaml
+      SAB_LOG_LEVEL: ${SAB_LOG_LEVEL:-INFO}
+      SAB_EMBED_BASE_URL: ${SAB_EMBED_BASE_URL:-}
+      SAB_EMBED_API_KEY: ${SAB_EMBED_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AWS_REGION: ${AWS_REGION:-us-west-2}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+    volumes:
+      - ./config/workspace.yaml:/app/config/workspace.yaml:ro

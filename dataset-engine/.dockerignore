@@ -1,0 +1,14 @@
+.git
+.pytest_cache
+__pycache__
+**/__pycache__
+*.py[cod]
+env
+.venv
+integration
+tests
+thoughts
+config/workspace.yaml
+config/*.local.yaml
+.env
+s3.yaml

@@ -48,7 +48,7 @@ class TextEmbedder:
         self.base_url = (
             base_url
             if base_url is not None
-            else os.getenv("SAB_EMBED_BASE_URL")
+            else os.getenv("SAB_EMBED_BASE_URL") or None
         )
         self.api_key = (
             api_key

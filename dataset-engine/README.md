@@ -10,6 +10,27 @@ cp config/workspace.example.yaml config/workspace.yaml
 uvicorn api.app:app --host 127.0.0.1 --port 8000
 ```
 
+### Docker
+
+The published image is `DOCKERHUB_USERNAME/sab-dataset-engine`. From this
+directory, create `config/workspace.yaml` and start the service with Docker
+Compose:
+
+```sh
+cp config/workspace.example.yaml config/workspace.yaml
+export DOCKERHUB_USERNAME=your-dockerhub-user
+export DATASET_ENGINE_IMAGE="$DOCKERHUB_USERNAME/sab-dataset-engine:latest"
+docker compose up -d
+```
+
+Compose mounts the workspace read-only and binds the API to `127.0.0.1:8000`
+by default. Set `DATASET_ENGINE_BIND` only when a trusted reverse proxy or
+other access control protects the service. Set embedding endpoint and AWS
+credentials in the environment used by Compose, or use an AWS role available
+to the container.
+The image includes the engine and API dependencies but does not include
+workspace secrets or local configuration.
+
 The normal UI path is workspace-driven. Edit `config/workspace.yaml` with
 your dataset, target bucket, and any number of source systems, then reload the
 page. The API reads the file on every request, so no restart is needed.
