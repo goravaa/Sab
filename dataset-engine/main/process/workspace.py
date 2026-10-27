@@ -103,7 +103,14 @@ def load_workspace(path: str | Path | None = None) -> DatasetConfig:
             SourceConfig.model_validate(item)
             for item in raw_sources
         ]
-        data_model = DataModelConfig.model_validate(document.get("data_model") or {})
+        raw_data_model = document.get("data_model") or {}
+        embed_model = os.getenv("SAB_EMBED_MODEL")
+        if embed_model:
+            raw_data_model = dict(raw_data_model)
+            raw_embedder = dict(raw_data_model.get("embedder") or {})
+            raw_embedder["model"] = embed_model
+            raw_data_model["embedder"] = raw_embedder
+        data_model = DataModelConfig.model_validate(raw_data_model)
         item_batch_size = int(document.get("item_batch_size", 1000))
     except Exception as exc:
         raise WorkspaceConfigError(f"invalid workspace config: {exc}") from exc

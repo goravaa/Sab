@@ -43,10 +43,11 @@ sources:
       # profile: personal
 
 # Optional. Defaults match the engine defaults.
-# data_model:
-#   chunk:
-#     chunk_size: 512
-#     chunk_overlap: 50
-#   embedder:
-#     model: all-minilm
+# These model settings must match the vLLM service in compose.yaml.
+data_model:
+  chunk:
+    chunk_size: 512
+    chunk_overlap: 50
+  embedder:
+    model: BAAI/bge-m3
 # item_batch_size: 1000

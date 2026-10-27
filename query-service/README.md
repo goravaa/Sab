@@ -82,6 +82,12 @@ configured key and use the same model name as the dataset config. The vLLM chat
 model does not need to be called by Sab; the MCP host model receives tool
 results and writes the answer.
 
+The dataset-engine Compose stack starts vLLM with `BAAI/bge-m3` and maps it to
+`127.0.0.1:8001` on the host. For a query service running directly on that
+host, set `SAB_EMBED_BASE_URL=http://127.0.0.1:8001/v1` and use the same
+`VLLM_API_KEY` value as `SAB_EMBED_API_KEY`. A query service in the same Compose
+network can use `http://vllm:8000/v1` instead.
+
 The default transport is MCP stdio, where the host starts `mcp_server.py` as a
 subprocess. Streamable HTTP can be added for remote clients when deployment and
 authentication are ready.

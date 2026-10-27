@@ -13,7 +13,8 @@ uvicorn api.app:app --host 127.0.0.1 --port 8000
 ### Docker
 
 The published image is `garvw/sab-dataset-engine`. From this directory,
-create `config/workspace.yaml` and start the service with Docker Compose:
+create `config/workspace.yaml` and start the dataset engine and vLLM GPU
+embedding service with Docker Compose:
 
 ```sh
 cp config/workspace.example.yaml config/workspace.yaml
@@ -23,6 +24,19 @@ docker compose up -d
 
 To build from source instead, run `docker build -t garvw/sab-dataset-engine:local .`
 and set `DATASET_ENGINE_IMAGE` to that tag.
+
+Compose starts vLLM with `BAAI/bge-m3` and connects the dataset engine to it
+over the private Compose network. Compose sets `SAB_EMBED_MODEL` for the engine,
+so it uses the same model even if the workspace file names another one. The
+supplied workspace example also sets `data_model.embedder.model: BAAI/bge-m3`.
+Set `SAB_EMBED_MODEL` in the environment if you want to serve another supported
+vLLM pooling model; the same value is sent to vLLM and the engine. The Compose
+stack waits for vLLM to finish loading the model before starting the API.
+vLLM also listens on `127.0.0.1:8001` for host-side query services. On a GPU
+host, install the NVIDIA Container Toolkit before running Compose. The model
+weights are cached in a named volume. Override `VLLM_API_KEY` to replace the
+local-only default key. Changing from another embedding model requires
+reindexing the dataset.
 
 Compose mounts the workspace read-only and binds the API to `127.0.0.1:8000`
 by default. Set `DATASET_ENGINE_BIND` only when a trusted reverse proxy or

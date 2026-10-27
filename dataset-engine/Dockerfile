@@ -10,10 +10,14 @@ WORKDIR /app
 RUN addgroup --system app && adduser --system --ingroup app app
 
 COPY pyproject.toml ./
+COPY api/requirements.txt /tmp/api-requirements.txt
+RUN sed '/^-e \.$/d' /tmp/api-requirements.txt > /tmp/runtime-requirements.txt \
+    && python -m pip install --upgrade pip \
+    && python -m pip install -r /tmp/runtime-requirements.txt
+
 COPY api ./api
 COPY main ./main
-RUN python -m pip install --upgrade pip \
-    && python -m pip install -r api/requirements.txt
+RUN python -m pip install --no-deps -e .
 
 COPY --chown=app:app config/workspace.example.yaml ./config/workspace.example.yaml
 
