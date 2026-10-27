@@ -31,6 +31,7 @@ sources:
       database: dev_db
       username: devuser
       password: ${POSTGRES_PASSWORD}
+      # For IAM auth, omit password and set auth_mode: iam plus region: us-west-2.
   - name: supplier-exports
     label: Supplier exports
     description: PDFs and spreadsheets.
@@ -47,6 +48,14 @@ sources:
 S3 sources and the target may omit credentials to use the standard AWS chain
 (environment, profile, SSO, or instance role). Set `profile` to choose a named
 profile. `${ENV_VAR}` values are expanded from the server environment.
+
+Postgres sources support both password authentication (the default) and Aurora
+PostgreSQL IAM authentication. For IAM, set `auth_mode: iam`, set the AWS
+`region`, omit `password`, and run the engine with AWS credentials that have
+`rds-db:connect` permission for the database user. The connector generates a
+fresh IAM token for every database connection and requires TLS. AWS credentials
+come from the standard boto3 chain, including `AWS_PROFILE`, SSO, environment
+credentials, or an instance role.
 
 The UI exposes workspace status, per-source indexed counts, target state,
 change preview, and indexing. Credentials are read only by the server and are

@@ -140,7 +140,9 @@ def target_uri(config: DatasetConfig) -> str:
 
 
 def _auth_mode(connection: Any) -> str:
-    if connection.type in {"postgres", "mysql"}:
+    if connection.type == "postgres":
+        return connection.auth_mode
+    if connection.type == "mysql":
         return "password"
     if getattr(connection, "access_key_id", None):
         return "static"

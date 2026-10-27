@@ -17,7 +17,7 @@ class PostgresConnector:
         self.connect_timeout = connect_timeout
 
     def _connect(self):
-        """Open a psycopg 3 connection, importing the optional driver lazily."""
+        """Open a connection with a password or a fresh AWS IAM auth token."""
         try:
             import psycopg
             from psycopg.rows import dict_row
@@ -26,14 +26,44 @@ class PostgresConnector:
                 "PostgreSQL support requires psycopg 3; install the 'psycopg[binary]' package"
             ) from exc
 
+        password: str
+        options: dict[str, Any] = {}
+        if self.config.auth_mode == "iam":
+            try:
+                import boto3
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Postgres IAM authentication requires boto3; install the dataset-engine API dependencies"
+                ) from exc
+
+            session = boto3.Session(region_name=self.config.region)
+            region = self.config.region or session.region_name
+            if not region:
+                raise ValueError(
+                    "Postgres IAM authentication needs a region in the source config "
+                    "or AWS_REGION/AWS_DEFAULT_REGION in the environment"
+                )
+            password = session.client("rds", region_name=region).generate_db_auth_token(
+                DBHostname=self.config.host,
+                Port=self.config.port,
+                DBUsername=self.config.username,
+            )
+            # IAM database authentication requires TLS. 'require' encrypts the
+            # connection while remaining compatible with system CA bundles.
+            options["sslmode"] = "require"
+        else:
+            assert self.config.password is not None
+            password = self.config.password.get_secret_value()
+
         connection = psycopg.connect(
             host=self.config.host,
             port=self.config.port,
             dbname=self.config.database,
             user=self.config.username,
-            password=self.config.password.get_secret_value(),
+            password=password,
             connect_timeout=self.connect_timeout,
             row_factory=dict_row,
+            **options,
         )
         # The engine only inspects source data; each connection is explicitly
         # placed in read-only mode to guard against accidental writes.

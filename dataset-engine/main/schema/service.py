@@ -24,8 +24,20 @@ class DatabaseConfig(BaseModel):
     port: int = Field(ge=1, le=65535)
     database: str
     username: str
-    password: SecretStr
+    password: Optional[SecretStr] = None
+    auth_mode: Literal["password", "iam"] = "password"
+    region: Optional[str] = None
     tables: Optional[list[str]] = None
+
+    @model_validator(mode="after")
+    def _validate_auth(self):
+        if self.auth_mode == "password" and self.password is None:
+            raise ValueError("password is required when auth_mode is 'password'")
+        if self.auth_mode == "iam" and self.password is not None:
+            raise ValueError("password must be omitted when auth_mode is 'iam'")
+        if self.auth_mode == "iam" and self.type != "postgres":
+            raise ValueError("IAM database authentication is currently supported only for Postgres")
+        return self
 
 
 class S3Config(BaseModel):

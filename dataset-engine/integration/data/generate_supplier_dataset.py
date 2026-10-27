@@ -20,16 +20,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 import boto3
-import psycopg
 from botocore.exceptions import ClientError
 from docx import Document as WordDocument
 from openpyxl import Workbook
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
-from main.connect.database.postgres import PostgresConnector
-from main.connect.object_storage.s3 import S3Connector
-from main.schema.service import DatabaseConfig, S3Config
 
 
 ROOT = INTEGRATION_ROOT
@@ -123,8 +119,9 @@ def company_name(rng: random.Random) -> str:
 
 def build_data(seed: int, count: int) -> dict[str, Any]:
     rng = random.Random(seed)
+    # Five calendar years of history ending at the dataset's fixed as-of date.
     today = date(2026, 10, 22)
-    earliest = date(2025, 1, 1)
+    earliest = date(2021, 10, 22)
     date_span = (today - earliest).days
     prefix = f"supplier-demo/seed-{seed:04d}/"
 
@@ -133,13 +130,14 @@ def build_data(seed: int, count: int) -> dict[str, Any]:
         customer_id = f"CUST-{seed:04d}-{n:06d}"
         first, last = rng.choice(FIRST_NAMES), rng.choice(LAST_NAMES)
         city, state, postal = rng.choice(CITIES)
+        segment = rng.choices(["small business", "mid-market", "enterprise"], [55, 35, 10])[0]
         customers.append({
             "customer_id": customer_id,
             "company_name": company_name(rng),
             "contact_name": f"{first} {last}",
             "email": f"{first.lower()}.{last.lower()}.{n}@example.test",
             "phone": f"+1-555-{rng.randrange(200, 999):03d}-{rng.randrange(1000):04d}",
-            "segment": rng.choices(["small business", "mid-market", "enterprise"], [55, 35, 10])[0],
+            "segment": segment,
             "city": city,
             "state": state,
             "postal_code": postal,
@@ -170,14 +168,28 @@ def build_data(seed: int, count: int) -> dict[str, Any]:
     order_counter = item_counter = shipment_counter = ticket_counter = 0
     for customer in customers:
         customer_order_ids: list[str] = []
-        for _ in range(rng.choices([1, 2, 3, 4, 5], [18, 24, 30, 20, 8])[0]):
+        # Larger accounts place more orders; dates lean toward recent quarters
+        # while retaining a full five-year history and seasonal variation.
+        order_count = rng.choices([1, 2, 3, 4, 5, 7, 10], [10, 19, 27, 20, 12, 8, 4])[0]
+        if customer["segment"] == "enterprise":
+            order_count += rng.randint(2, 6)
+        elif customer["segment"] == "mid-market":
+            order_count += rng.randint(0, 2)
+        for _ in range(order_count):
             order_counter += 1
             order_id = f"ORD-{seed:04d}-{order_counter:07d}"
-            placed = earliest + timedelta(days=rng.randrange(date_span + 1))
+            # Bias toward recent activity, then apply mild quarter-end seasonality.
+            age = int((rng.random() ** 1.45) * date_span)
+            placed = today - timedelta(days=age)
+            if placed.month in (3, 6, 9, 12) and rng.random() < 0.62:
+                placed = placed - timedelta(days=rng.randint(0, 20))
             status = rng.choices(
                 ["delivered", "shipped", "processing", "cancelled", "returned"],
                 [54, 18, 14, 8, 6],
             )[0]
+            # Recent orders are less likely to have reached their final state.
+            if (today - placed).days < 12:
+                status = rng.choices(["processing", "shipped", "delivered"], [55, 35, 10])[0]
             chosen_products = rng.sample(products, rng.randint(1, 4))
             line_total = Decimal("0.00")
             line_items = []
@@ -214,6 +226,8 @@ def build_data(seed: int, count: int) -> dict[str, Any]:
 
             invoice_id = f"INV-{seed:04d}-{order_counter:07d}"
             invoice_status = rng.choices(["paid", "open", "overdue", "void"], [68, 18, 9, 5])[0]
+            if (today - placed).days < 30 and invoice_status in {"overdue", "paid"}:
+                invoice_status = "open"
             invoice_key = f"{prefix}invoices/{invoice_id}.pdf"
             invoices.append({
                 "invoice_id": invoice_id,
@@ -241,7 +255,7 @@ def build_data(seed: int, count: int) -> dict[str, Any]:
                     "delivered_on": delivered_on,
                 })
 
-        for _ in range(rng.choices([0, 1, 2, 3], [48, 35, 14, 3])[0]):
+        for _ in range(rng.choices([0, 1, 2, 3], [40, 38, 17, 5])[0]):
             ticket_counter += 1
             opened = earliest + timedelta(days=rng.randrange(date_span + 1))
             tickets.append({
@@ -273,6 +287,10 @@ def build_data(seed: int, count: int) -> dict[str, Any]:
 
 def create_local_files(data: dict[str, Any], output: Path) -> dict[str, Path]:
     output.mkdir(parents=True, exist_ok=True)
+    s3_output = output / "s3" / "data"
+    database_output = output / "database" / "data"
+    s3_output.mkdir(parents=True, exist_ok=True)
+    database_output.mkdir(parents=True, exist_ok=True)
     prefix = data["prefix"]
     key_to_path: dict[str, Path] = {}
     customer_lookup = {row["customer_id"]: row for row in data["customers"]}
@@ -281,7 +299,7 @@ def create_local_files(data: dict[str, Any], output: Path) -> dict[str, Path]:
 
     def destination(key: str) -> Path:
         relative = key.removeprefix(prefix)
-        path = output / relative
+        path = s3_output / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         key_to_path[key] = path
         return path
@@ -385,12 +403,89 @@ def create_local_files(data: dict[str, Any], output: Path) -> dict[str, Path]:
         orders_sheet.append([order["order_id"], order["customer_id"], iso(order["placed_on"]), order["status"], float(order["total"])])
     workbook.save(catalog_path)
 
+    tables = {
+        "customers": (data["customers"], ["customer_id", "company_name", "contact_name", "email", "phone", "segment", "city", "state", "postal_code", "created_at", "agreement_key"]),
+        "products": (data["products"], ["sku", "product_name", "category", "unit_price", "active", "reorder_level", "on_hand", "catalog_key"]),
+        "orders": (data["orders"], ["order_id", "customer_id", "placed_on", "status", "subtotal", "tax", "shipping", "total"]),
+        "order_items": (data["order_items"], ["item_id", "order_id", "sku", "quantity", "unit_price", "line_total"]),
+        "invoices": (data["invoices"], ["invoice_id", "order_id", "issued_on", "due_on", "status", "total", "object_key"]),
+        "shipments": (data["shipments"], ["shipment_id", "order_id", "customer_id", "carrier", "tracking_number", "status", "shipped_on", "delivered_on", "tracking_export_key"]),
+        "support_tickets": (data["tickets"], ["ticket_id", "customer_id", "order_id", "opened_at", "category", "priority", "status", "subject", "document_key"]),
+    }
+    for table, (rows, fields) in tables.items():
+        csv_path = database_output / f"{table}.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=fields)
+            writer.writeheader()
+            for row in rows:
+                record = dict(row)
+                if table == "products":
+                    record["catalog_key"] = data["catalog_key"]
+                elif table == "shipments":
+                    record["tracking_export_key"] = data["tracking_key"]
+                writer.writerow({field: iso(record.get(field)) if isinstance(record.get(field), (date, datetime)) else record.get(field, "") for field in fields})
+
+    load_sql = """-- Run from this directory with: psql "$DATABASE_URL" -f load.sql
+CREATE SCHEMA IF NOT EXISTS supplier_demo;
+
+CREATE TABLE supplier_demo.customers (
+    customer_id text PRIMARY KEY, company_name text NOT NULL, contact_name text NOT NULL,
+    email text NOT NULL UNIQUE, phone text NOT NULL, segment text NOT NULL,
+    city text NOT NULL, state text NOT NULL, postal_code text NOT NULL,
+    created_at date NOT NULL, agreement_key text NOT NULL
+);
+CREATE TABLE supplier_demo.products (
+    sku text PRIMARY KEY, product_name text NOT NULL, category text NOT NULL,
+    unit_price numeric(10,2) NOT NULL, active boolean NOT NULL,
+    reorder_level integer NOT NULL, on_hand integer NOT NULL, catalog_key text NOT NULL
+);
+CREATE TABLE supplier_demo.orders (
+    order_id text PRIMARY KEY, customer_id text NOT NULL REFERENCES supplier_demo.customers(customer_id),
+    placed_on date NOT NULL, status text NOT NULL, subtotal numeric(12,2) NOT NULL,
+    tax numeric(12,2) NOT NULL, shipping numeric(12,2) NOT NULL, total numeric(12,2) NOT NULL
+);
+CREATE TABLE supplier_demo.order_items (
+    item_id text PRIMARY KEY, order_id text NOT NULL REFERENCES supplier_demo.orders(order_id),
+    sku text NOT NULL REFERENCES supplier_demo.products(sku), quantity integer NOT NULL,
+    unit_price numeric(10,2) NOT NULL, line_total numeric(12,2) NOT NULL
+);
+CREATE TABLE supplier_demo.invoices (
+    invoice_id text PRIMARY KEY, order_id text NOT NULL UNIQUE REFERENCES supplier_demo.orders(order_id),
+    issued_on date NOT NULL, due_on date NOT NULL, status text NOT NULL,
+    total numeric(12,2) NOT NULL, object_key text NOT NULL
+);
+CREATE TABLE supplier_demo.shipments (
+    shipment_id text PRIMARY KEY, order_id text NOT NULL UNIQUE REFERENCES supplier_demo.orders(order_id),
+    customer_id text NOT NULL REFERENCES supplier_demo.customers(customer_id), carrier text NOT NULL,
+    tracking_number text NOT NULL UNIQUE, status text NOT NULL, shipped_on date NOT NULL,
+    delivered_on date, tracking_export_key text NOT NULL
+);
+CREATE TABLE supplier_demo.support_tickets (
+    ticket_id text PRIMARY KEY, customer_id text NOT NULL REFERENCES supplier_demo.customers(customer_id),
+    order_id text REFERENCES supplier_demo.orders(order_id), opened_at date NOT NULL,
+    category text NOT NULL, priority text NOT NULL, status text NOT NULL,
+    subject text NOT NULL, document_key text NOT NULL
+);
+
+\\copy supplier_demo.customers FROM 'customers.csv' WITH (FORMAT csv, HEADER true)
+\\copy supplier_demo.products FROM 'products.csv' WITH (FORMAT csv, HEADER true)
+\\copy supplier_demo.orders FROM 'orders.csv' WITH (FORMAT csv, HEADER true)
+\\copy supplier_demo.order_items FROM 'order_items.csv' WITH (FORMAT csv, HEADER true)
+\\copy supplier_demo.invoices FROM 'invoices.csv' WITH (FORMAT csv, HEADER true)
+\\copy supplier_demo.shipments FROM 'shipments.csv' WITH (FORMAT csv, HEADER true)
+\\copy supplier_demo.support_tickets FROM 'support_tickets.csv' WITH (FORMAT csv, HEADER true)
+"""
+    (database_output / "load.sql").write_text(load_sql, encoding="utf-8")
+
     manifest = {
         "description": "Synthetic B2B equipment supplier data; all records and documents are fictional.",
         "seed": data["seed"],
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "postgres_schema": DB_SCHEMA,
         "s3_prefix": data["prefix"],
+        "history_start": "2021-10-22",
+        "history_end": "2026-10-22",
+        "local_layout": {"database_csv": "database/data/", "s3_objects": "s3/data/"},
         "counts": {key: len(data[key]) for key in ("customers", "products", "orders", "order_items", "invoices", "shipments", "tickets")},
         "object_counts_by_type": {
             "docx_customer_agreements": len(data["customers"]),
@@ -414,6 +509,8 @@ def create_local_files(data: dict[str, Any], output: Path) -> dict[str, Path]:
 
 
 def seed_postgres(data: dict[str, Any], config: dict[str, Any]) -> None:
+    import psycopg
+
     with psycopg.connect(**config, connect_timeout=10) as connection:
         connection.execute(f"CREATE SCHEMA IF NOT EXISTS {DB_SCHEMA}")
         connection.execute(f"""
@@ -534,6 +631,10 @@ def upload_files(client: Any, bucket: str, files: dict[str, Path], workers: int)
 
 
 def verify_connectors(data: dict[str, Any]) -> None:
+    from main.connect.database.postgres import PostgresConnector
+    from main.connect.object_storage.s3 import S3Connector
+    from main.schema.service import DatabaseConfig, S3Config
+
     db_config = DatabaseConfig(
         type="postgres",
         host="127.0.0.1",

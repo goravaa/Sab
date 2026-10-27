@@ -24,6 +24,9 @@ sources:
       database: dev_db
       username: devuser
       password: change-me
+      # For Aurora PostgreSQL IAM auth, replace password with:
+      # auth_mode: iam
+      # region: us-west-2
       tables: []
 
   - name: supplier-exports
