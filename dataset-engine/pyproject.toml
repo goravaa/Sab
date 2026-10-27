@@ -7,6 +7,10 @@ requires-python = ">=3.10"
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["api*", "main*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests", "integration/tests"]
 pythonpath = ["."]
