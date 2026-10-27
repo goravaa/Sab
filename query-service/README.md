@@ -76,8 +76,11 @@ The default sample target is `sab-data/sab-datasets/ui-smoke-173645` in
 `SAB_EMBED_BASE_URL` must serve the same embedding model recorded in the
 dataset config. The example uses local Ollama `all-minilm`; when the MCP server
 runs on Chotu, point it at an embedding endpoint reachable from Chotu that
-serves the matching model. The vLLM chat model does not need to be called by
-Sab; the MCP host model receives tool results and writes the answer.
+serves the matching model. A GPU host running vLLM can serve this through its
+OpenAI-compatible `/v1/embeddings` endpoint; set `SAB_EMBED_API_KEY` to its
+configured key and use the same model name as the dataset config. The vLLM chat
+model does not need to be called by Sab; the MCP host model receives tool
+results and writes the answer.
 
 The default transport is MCP stdio, where the host starts `mcp_server.py` as a
 subprocess. Streamable HTTP can be added for remote clients when deployment and

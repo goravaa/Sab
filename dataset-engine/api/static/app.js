@@ -4,6 +4,7 @@ const previewButton = $("preview");
 const submitButton = $("submit-job");
 
 let workspace = null;
+let progressSamples = [];
 
 function setBusy(busy) {
   reloadButton.disabled = busy;
@@ -19,6 +20,48 @@ function showError(message) {
 
 function formatNumber(value) {
   return Number(value || 0).toLocaleString();
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return "Estimating time remaining…";
+  const remaining = Math.ceil(seconds);
+  if (remaining < 60) return "Less than a minute remaining";
+  const minutes = Math.ceil(remaining / 60);
+  if (minutes < 60) return `About ${minutes} min remaining`;
+  const hours = Math.floor(minutes / 60);
+  const extraMinutes = minutes % 60;
+  if (hours < 24) {
+    return extraMinutes
+      ? `About ${hours} hr ${extraMinutes} min remaining`
+      : `About ${hours} hr remaining`;
+  }
+  const days = Math.floor(hours / 24);
+  const extraHours = hours % 24;
+  return extraHours
+    ? `About ${days} d ${extraHours} hr remaining`
+    : `About ${days} d remaining`;
+}
+
+function updateProgressEta(progress) {
+  const now = performance.now();
+  const processed = Number(progress.processed_items || 0);
+  progressSamples.push({ processed, at: now });
+  if (progressSamples.length > 5) progressSamples.shift();
+
+  const first = progressSamples[0];
+  const last = progressSamples[progressSamples.length - 1];
+  const deltaItems = last.processed - first.processed;
+  const elapsedSeconds = (last.at - first.at) / 1000;
+  const remainingItems = Math.max(0, Number(progress.total_items || 0) - processed);
+
+  if (remainingItems === 0) {
+    $("progress-eta").textContent = "Finishing up…";
+  } else if (deltaItems <= 0 || elapsedSeconds <= 0) {
+    $("progress-eta").textContent = "Estimating time remaining…";
+  } else {
+    const itemsPerSecond = deltaItems / elapsedSeconds;
+    $("progress-eta").textContent = formatDuration(remainingItems / itemsPerSecond);
+  }
 }
 
 function authLabel(mode) {
@@ -234,6 +277,8 @@ submitButton.addEventListener("click", async () => {
   $("progress-value").textContent = "0%";
   $("progress-label").textContent = "Preparing job…";
   $("job-message").textContent = "Scanning configured sources and preparing batches.";
+  $("progress-eta").textContent = "ETA starts after the source scan.";
+  progressSamples = [];
 
   try {
     const response = await fetch("/v1/workspace/jobs/stream", { method: "POST" });
@@ -296,6 +341,7 @@ function handleEvent(block) {
     $("progress-value").textContent = `${Math.round(ratio * 100)}%`;
     $("progress-label").textContent = `${formatNumber(progress.processed_items)} of ${formatNumber(progress.total_items)} items`;
     $("job-message").textContent = `${formatNumber(progress.completed_batches)} batches completed.`;
+    updateProgressEta(progress);
     return;
   }
   if (eventName === "completed") {
@@ -308,6 +354,7 @@ function handleEvent(block) {
     $("progress-value").textContent = "100%";
     $("progress-label").textContent = `${formatNumber(progress.processed_items)} of ${formatNumber(progress.total_items)} items`;
     $("job-message").textContent = "The dataset is ready to query.";
+    $("progress-eta").textContent = "Complete";
     loadWorkspace({ quiet: true });
     return;
   }
@@ -316,6 +363,7 @@ function handleEvent(block) {
     $("result-badge").textContent = "Failed";
     $("result-badge").className = "badge failed";
     $("job-message").textContent = data.error || "The job failed.";
+    $("progress-eta").textContent = "ETA unavailable because indexing failed.";
     showError(data.error || "The indexing job failed.");
   }
 }

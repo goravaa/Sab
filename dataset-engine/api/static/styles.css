@@ -936,6 +936,13 @@ progress::-moz-progress-bar {
   color: #9eb1a4;
 }
 
+.progress-eta {
+  margin: 6px 0 0;
+  min-height: 16px;
+  color: #9ceec0;
+  font-size: 12px;
+}
+
 .run-footnote {
   margin: auto 0 0;
   padding-top: 18px;

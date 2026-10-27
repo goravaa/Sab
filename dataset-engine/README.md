@@ -75,6 +75,22 @@ ignores it. The supplier workspace uses the `all-minilm` model. Keep Ollama
 bound to localhost; the API should call it over `127.0.0.1` from the same EC2
 instance.
 
+The engine also accepts any OpenAI-compatible embeddings server, including
+vLLM's embeddings endpoint. Run a supported pooling/embedding model on a GPU
+machine, then point both the dataset engine and query service at that endpoint:
+
+```sh
+export SAB_EMBED_BASE_URL=http://gpu-embedder.internal:8000/v1
+export SAB_EMBED_API_KEY=your-vllm-api-key
+```
+
+Set `data_model.embedder.model` to the model name served by vLLM. The same
+model and endpoint must be used for indexing and querying. Changing embedding
+models requires reindexing the dataset so all stored vectors use the same
+model. Keep the GPU server on a private network and configure its API key.
+vLLM supports the OpenAI-compatible `/v1/embeddings` API for embedding models;
+see the [vLLM embedding documentation](https://docs.vllm.ai/en/stable/models/pooling_models/embed/).
+
 The UI exposes workspace status, per-source indexed counts, target state,
 change preview, and indexing. Credentials are read only by the server and are
 never returned to the browser. `config/workspace.yaml` is gitignored; keep it
