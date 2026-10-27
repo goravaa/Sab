@@ -1,9 +1,6 @@
 services:
   dataset-engine:
-    image: ${DATASET_ENGINE_IMAGE:-sab-dataset-engine:local}
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ${DATASET_ENGINE_IMAGE:-garvw/sab-dataset-engine:latest}
     restart: unless-stopped
     ports:
       - "${DATASET_ENGINE_BIND:-127.0.0.1}:${DATASET_ENGINE_PORT:-8000}:8000"

@@ -12,16 +12,17 @@ uvicorn api.app:app --host 127.0.0.1 --port 8000
 
 ### Docker
 
-The published image is `DOCKERHUB_USERNAME/sab-dataset-engine`. From this
-directory, create `config/workspace.yaml` and start the service with Docker
-Compose:
+The published image is `garvw/sab-dataset-engine`. From this directory,
+create `config/workspace.yaml` and start the service with Docker Compose:
 
 ```sh
 cp config/workspace.example.yaml config/workspace.yaml
-export DOCKERHUB_USERNAME=your-dockerhub-user
-export DATASET_ENGINE_IMAGE="$DOCKERHUB_USERNAME/sab-dataset-engine:latest"
+docker compose pull
 docker compose up -d
 ```
+
+To build from source instead, run `docker build -t garvw/sab-dataset-engine:local .`
+and set `DATASET_ENGINE_IMAGE` to that tag.
 
 Compose mounts the workspace read-only and binds the API to `127.0.0.1:8000`
 by default. Set `DATASET_ENGINE_BIND` only when a trusted reverse proxy or
