@@ -57,6 +57,24 @@ fresh IAM token for every database connection and requires TLS. AWS credentials
 come from the standard boto3 chain, including `AWS_PROFILE`, SSO, environment
 credentials, or an instance role.
 
+### Embeddings
+
+Indexing requires the OpenAI Python client and an OpenAI-compatible embeddings
+endpoint. The API requirements install the client. The model name is selected
+by `data_model.embedder.model` in the workspace file. For the local Ollama
+service on the EC2 instance, export these variables in the shell that starts
+the API:
+
+```sh
+export SAB_EMBED_BASE_URL=http://127.0.0.1:11434/v1
+export SAB_EMBED_API_KEY=ollama
+```
+
+`ollama` is a placeholder key required by the OpenAI client; local Ollama
+ignores it. The supplier workspace uses the `all-minilm` model. Keep Ollama
+bound to localhost; the API should call it over `127.0.0.1` from the same EC2
+instance.
+
 The UI exposes workspace status, per-source indexed counts, target state,
 change preview, and indexing. Credentials are read only by the server and are
 never returned to the browser. `config/workspace.yaml` is gitignored; keep it
