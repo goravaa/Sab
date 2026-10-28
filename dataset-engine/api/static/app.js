@@ -48,7 +48,41 @@ function formatDuration(seconds) {
     : `About ${days} d remaining`;
 }
 
-function updateProgressEta(progress) {
+function etaText(seconds) {
+  return formatDuration(seconds);
+}
+
+function etaRateSuffix(itemsPerSecond) {
+  if (!Number.isFinite(itemsPerSecond)) return "";
+  const rounded = itemsPerSecond < 10
+    ? Math.round(itemsPerSecond * 10) / 10
+    : Math.round(itemsPerSecond);
+  return ` · ~${rounded} items/s`;
+}
+
+function applyProgressEta(progress) {
+  // The server computes ETA from persisted batch ticks, so it survives
+  // page refreshes; fall back to client-side estimation before two
+  // batches of history exist.
+  const serverEta = Number(progress.eta_seconds);
+  const rate = Number(progress.items_per_second);
+  if (Number.isFinite(serverEta)) {
+    if (serverEta === 0) {
+      $("progress-eta").textContent = "Finishing up…";
+      return;
+    }
+    // Limit changes between polls so normal batch-to-batch variation does
+    // not make the displayed ETA jump around.
+    displayedEtaSeconds = displayedEtaSeconds === null
+      ? serverEta
+      : Math.max(displayedEtaSeconds * 0.85, Math.min(displayedEtaSeconds * 1.15, serverEta));
+    $("progress-eta").textContent = etaText(displayedEtaSeconds) + etaRateSuffix(rate);
+    return;
+  }
+  updateProgressEta(progress, rate);
+}
+
+function updateProgressEta(progress, serverRate) {
   const now = performance.now();
   const processed = Number(progress.processed_items || 0);
   progressSamples.push({ processed, at: now });
@@ -81,7 +115,7 @@ function updateProgressEta(progress) {
     displayedEtaSeconds = displayedEtaSeconds === null
       ? estimate
       : Math.max(displayedEtaSeconds * 0.85, Math.min(displayedEtaSeconds * 1.15, estimate));
-    $("progress-eta").textContent = formatDuration(displayedEtaSeconds);
+    $("progress-eta").textContent = etaText(displayedEtaSeconds) + etaRateSuffix(serverRate);
   }
 }
 
@@ -89,6 +123,77 @@ function authLabel(mode) {
   if (mode === "password") return "Password";
   if (mode === "static") return "Access keys";
   return "IAM chain";
+}
+
+function renderProgressBars(progress) {
+  const ratio = Math.min(1, Math.max(0, Number(progress.ratio || 0)));
+  $("progress-bar").value = ratio;
+  $("progress-value").textContent = `${Math.round(ratio * 100)}%`;
+  $("progress-label").textContent = `${formatNumber(progress.processed_items)} of ${formatNumber(progress.total_items)} items`;
+}
+
+function progressFinished(progress) {
+  return Number(progress.total_items) > 0
+    && Number(progress.processed_items) >= Number(progress.total_items);
+}
+
+function sourceDelta(counts, key, prefix) {
+  const value = Number(counts[key] || 0);
+  if (!value) return null;
+  const chip = document.createElement("span");
+  chip.className = `source-delta ${key}`;
+  chip.textContent = `${prefix}${formatNumber(value)}`;
+  chip.title = `${formatNumber(value)} ${key}`;
+  return chip;
+}
+
+function sourceProgressRow(entry) {
+  const name = String(entry.name || "Source");
+  const done = Number(entry.processed_items || 0);
+  const total = Number(entry.total_items || 0);
+  const counts = { new: entry.new, modified: entry.modified, deleted: entry.deleted };
+
+  const item = document.createElement("li");
+  item.className = `source-progress-row ${done >= total ? "done" : ""}`;
+
+  const head = document.createElement("div");
+  head.className = "source-progress-head";
+
+  const label = document.createElement("span");
+  label.className = "source-progress-name";
+  label.textContent = name;
+  head.append(label);
+
+  const summary = document.createElement("span");
+  summary.className = "source-progress-counts";
+  if (total === 0) summary.textContent = "No items";
+  else if (done >= total) summary.textContent = `${formatNumber(total)} items indexed`;
+  else summary.textContent = `${formatNumber(done)} of ${formatNumber(total)} items`;
+  head.append(summary);
+
+  const deltas = document.createElement("span");
+  deltas.className = "source-progress-deltas";
+  for (const [key, prefix] of [["new", "+"], ["modified", "~"], ["deleted", "−"]]) {
+    const chip = sourceDelta(counts, key, prefix);
+    if (chip) deltas.append(chip);
+  }
+  if (deltas.children.length) head.append(deltas);
+
+  const bar = document.createElement("progress");
+  bar.className = "source-progress-bar";
+  bar.max = 1;
+  bar.value = Math.min(1, Math.max(0, Number(entry.ratio || 0)));
+  bar.title = `${name}: ${Math.round(bar.value * 100)}%`;
+
+  item.append(head, bar);
+  return item;
+}
+
+function renderSourceProgress(sources) {
+  const list = $("source-progress");
+  const rows = Array.isArray(sources) ? sources : [];
+  list.hidden = rows.length === 0;
+  list.replaceChildren(...rows.map(sourceProgressRow));
 }
 
 function sourceAccess(access) {
@@ -138,25 +243,40 @@ function showJobProgress(job, { restored = false } = {}) {
   activeJobRunning = running;
   $("progress-area").hidden = false;
   renderDiff(job.diff || {});
-  $("result-title").textContent = running ? "Indexing dataset" : status === "completed" ? "Indexing complete" : "Indexing failed";
-  $("result-badge").textContent = running ? status === "preparing" ? "Preparing" : "Running" : status === "completed" ? "Complete" : "Failed";
-  $("result-badge").className = `badge ${running ? "running" : status === "completed" ? "done" : "failed"}`;
-  const ratio = Math.min(1, Math.max(0, Number(progress.ratio || 0)));
-  $("progress-bar").value = ratio;
-  $("progress-value").textContent = `${Math.round(ratio * 100)}%`;
-  $("progress-label").textContent = `${formatNumber(progress.processed_items)} of ${formatNumber(progress.total_items)} items`;
+  $("result-title").textContent = running
+    ? "Indexing dataset"
+    : status === "completed"
+      ? "Indexing complete"
+      : status === "interrupted"
+        ? "Indexing interrupted"
+        : "Indexing failed";
+  $("result-badge").textContent = running
+    ? status === "preparing" ? "Preparing" : "Running"
+    : status === "completed"
+      ? "Complete"
+      : status === "interrupted" ? "Interrupted" : "Failed";
+  $("result-badge").className = `badge ${running ? "running" : status === "completed" ? "done" : status === "interrupted" ? "interrupted" : "failed"}`;
+  renderProgressBars(progress);
+  renderSourceProgress(progress.sources);
 
   if (status === "preparing") {
     $("job-message").textContent = "Scanning configured sources and preparing batches.";
     $("progress-eta").textContent = "ETA starts after the source scan.";
+  } else if (running && progressFinished(progress)) {
+    $("job-message").textContent = "All batches processed. Committing the dataset…";
+    $("progress-eta").textContent = "Finishing up…";
   } else if (running) {
     $("job-message").textContent = `${formatNumber(progress.completed_batches)} batches completed.${restored ? " Restored after page reload." : ""}`;
-    updateProgressEta(progress);
+    applyProgressEta(progress);
   } else if (status === "completed") {
     $("progress-bar").value = 1;
     $("progress-value").textContent = "100%";
     $("job-message").textContent = "The dataset is ready to query.";
     $("progress-eta").textContent = "Complete";
+  } else if (status === "interrupted") {
+    $("job-message").textContent = job.error
+      || "The indexing runner stopped before finishing. Start indexing again to continue.";
+    $("progress-eta").textContent = "No ETA — indexing was interrupted.";
   } else {
     $("job-message").textContent = job.error || "The job failed.";
     $("progress-eta").textContent = "ETA unavailable because indexing failed.";
@@ -409,6 +529,7 @@ submitButton.addEventListener("click", async () => {
   $("job-message").textContent = "Scanning configured sources and preparing batches.";
   $("progress-eta").textContent = "ETA starts after the source scan.";
   progressSamples = [];
+  renderSourceProgress([]);
 
   try {
     const response = await fetch("/v1/workspace/jobs/stream", { method: "POST" });
@@ -472,12 +593,14 @@ function handleEvent(block) {
   if (eventName === "progress") {
     activeJobRunning = true;
     const progress = data.progress || {};
-    const ratio = Math.min(1, Math.max(0, Number(progress.ratio || 0)));
-    $("progress-bar").value = ratio;
-    $("progress-value").textContent = `${Math.round(ratio * 100)}%`;
-    $("progress-label").textContent = `${formatNumber(progress.processed_items)} of ${formatNumber(progress.total_items)} items`;
-    $("job-message").textContent = `${formatNumber(progress.completed_batches)} batches completed.`;
-    updateProgressEta(progress);
+    renderProgressBars(progress);
+    renderSourceProgress(progress.sources);
+    if (progressFinished(progress)) {
+      $("job-message").textContent = "All batches processed. Committing the dataset…";
+    } else {
+      $("job-message").textContent = `${formatNumber(progress.completed_batches)} batches completed.`;
+    }
+    applyProgressEta(progress);
     return;
   }
   if (eventName === "completed") {
@@ -491,6 +614,7 @@ function handleEvent(block) {
     $("progress-bar").value = 1;
     $("progress-value").textContent = "100%";
     $("progress-label").textContent = `${formatNumber(progress.processed_items)} of ${formatNumber(progress.total_items)} items`;
+    renderSourceProgress(progress.sources);
     $("job-message").textContent = "The dataset is ready to query.";
     $("progress-eta").textContent = "Complete";
     loadWorkspace({ quiet: true });

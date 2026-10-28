@@ -115,6 +115,31 @@ def receipt_key(job_id: str, batch_number: int) -> str:
     return f"jobs/{job_id}/progress/batch_{batch_number:04d}.json"
 
 
+def tick_key(job_id: str, batch_number: int) -> str:
+    """Small timestamp sidecar used for server-side ETA estimation."""
+
+    return f"jobs/{job_id}/progress/batch_{batch_number:04d}.tick.json"
+
+
+def save_tick(
+    store: DatasetStore,
+    job_id: str,
+    batch_number: int,
+    end_index: int,
+    processed_at: datetime,
+) -> None:
+    """Persist a compact progress tick; identical rewrites are harmless."""
+
+    store.write_bytes(
+        tick_key(job_id, batch_number),
+        json.dumps({
+            "batch_number": batch_number,
+            "end_index": end_index,
+            "processed_at": processed_at.isoformat(),
+        }).encode("utf-8"),
+    )
+
+
 def save_manifest(store: DatasetStore, manifest: JobManifest) -> None:
     store.write_bytes(
         manifest_key(manifest.job_id),
@@ -232,8 +257,12 @@ class JobProcessor:
                 records=[record.__dict__ for record in records.values()],
                 removed=sorted(removed),
             )
+            processed_at = receipt.processed_at
             if receipt_data is None:
                 self.store.write_bytes(key, receipt.model_dump_json(indent=2).encode("utf-8"))
+            # Rewritten on resume too, so freshly restarted batches report a
+            # current timestamp for rate estimation.
+            save_tick(self.store, manifest.job_id, batch_number, end, processed_at)
 
             progress = JobProgress(
                 total_items=len(manifest.entries),

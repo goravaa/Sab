@@ -8,16 +8,18 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import StreamingResponse
 
 from api.logging_config import get_logger
-from api.services.job_lock import DatasetJobLock, JobAlreadyRunning
 from api.schemas import JobLookupRequest, JobResponse, JobSubmitRequest
+from api.services.job_lock import DatasetJobLock, JobAlreadyRunning
 from api.services.jobs import (
     create_job,
+    granular_progress,
+    load_current_job_status,
     load_job_status,
     progress_from_receipts,
     run_job_background,
-    status_with_current_progress,
     store_for,
 )
+from main.process.runner import load_manifest
 
 router = APIRouter(prefix="/v1/jobs", tags=["jobs"])
 logger = get_logger(__name__)
@@ -92,6 +94,9 @@ def job_stream_response(
             asyncio.to_thread(run_job_background, job_id, config, job_lock)
         )
         yield _sse("job", JobResponse.model_validate(initial_status).model_dump(mode="json"))
+        # Batches fill the manifest sequentially, so one manifest read backs
+        # every granular per-source update; receipts supply the cursors.
+        manifest = load_manifest(store, job_id)
         previous: tuple[int, int] | None = None
         last_heartbeat = asyncio.get_running_loop().time()
 
@@ -99,10 +104,16 @@ def job_stream_response(
             await asyncio.sleep(0.5)
             status = load_job_status(store, job_id) or {}
             total = int(initial_status["progress"]["total_items"])
-            progress = progress_from_receipts(store, job_id, total)
-            marker = (progress.processed_items, progress.completed_batches)
+            # The receipt cursor is a cheap poll (one listing plus one small
+            # read); the granular breakdown reads recent ticks, so it only
+            # runs when the cursor actually moved.
+            cursor = progress_from_receipts(store, job_id, total)
+            marker = (cursor.processed_items, cursor.completed_batches)
             if marker != previous:
                 previous = marker
+                progress = cursor if manifest is None else granular_progress(
+                    store, job_id, manifest, total_items=total
+                )
                 yield _sse("progress", {
                     "job_id": job_id,
                     "status": status.get("status", "running"),
@@ -172,11 +183,11 @@ def get_job_status(job_id: str, request: JobLookupRequest) -> JobResponse:
     logger.debug("job status requested job_id=%s dataset=%s", job_id, request.dataset)
     store = store_for(request.target, request.dataset)
     try:
-        status = load_job_status(store, job_id)
+        status = load_current_job_status(store, job_id)
         if status is None:
             logger.warning("job status not found job_id=%s dataset=%s", job_id, request.dataset)
             raise HTTPException(status_code=404, detail="Job not found")
-        return JobResponse.model_validate(status_with_current_progress(store, job_id, status))
+        return JobResponse.model_validate(status)
     except HTTPException:
         raise
     except Exception as exc:

@@ -13,6 +13,9 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    # The runner stopped (crash, host restart) without a terminal write.
+    # Terminal from the UI's perspective, but distinguishable from FAILED.
+    INTERRUPTED = "interrupted"
 
 
 class DiffAction(str, Enum):
@@ -58,10 +61,35 @@ class BatchReceipt(BaseModel):
     removed: list[str] = Field(default_factory=list)
 
 
+class SourceProgress(BaseModel):
+    """Granular progress for one configured source within a running job."""
+
+    name: str
+    total_items: int = Field(default=0, ge=0)
+    processed_items: int = Field(default=0, ge=0)
+    new: int = Field(default=0, ge=0)
+    modified: int = Field(default=0, ge=0)
+    deleted: int = Field(default=0, ge=0)
+
+    @computed_field
+    @property
+    def ratio(self) -> float:
+        if self.total_items == 0:
+            return 0.0
+        return min(self.processed_items / self.total_items, 1.0)
+
+
 class JobProgress(BaseModel):
     total_items: int = Field(default=0, ge=0)
     processed_items: int = Field(default=0, ge=0)
     completed_batches: int = Field(default=0, ge=0)
+    # Server-side throughput estimate from per-batch ticks; None until at
+    # least two batches have timestamps to compare.
+    items_per_second: Optional[float] = Field(default=None, ge=0)
+    eta_seconds: Optional[float] = Field(default=None, ge=0)
+    # Optional per-source breakdown; receipts have no source info and old
+    # persisted statuses stay valid because the field defaults to empty.
+    sources: list[SourceProgress] = Field(default_factory=list)
 
     @computed_field
     @property

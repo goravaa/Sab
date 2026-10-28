@@ -9,8 +9,7 @@ from api.routes.jobs import job_stream_response
 from api.schemas import JobResponse, JobSubmitRequest
 from api.services.jobs import (
     create_job,
-    load_job_status,
-    status_with_current_progress,
+    load_current_job_status,
     store_for,
 )
 from api.services.job_lock import DatasetJobLock, JobAlreadyRunning
@@ -133,11 +132,11 @@ def get_active_workspace_job() -> dict:
         return {"job": active}
 
     store = store_for(config.target, config.dataset)
-    status = load_job_status(store, job_id)
+    status = load_current_job_status(store, job_id)
     if status is None:
         return {"job": active}
     return {
-        "job": status_with_current_progress(store, job_id, status),
+        "job": status,
     }
 
 
@@ -147,7 +146,7 @@ def get_workspace_job_status(job_id: str) -> JobResponse:
 
     config = _load()
     store = store_for(config.target, config.dataset)
-    status = load_job_status(store, job_id)
+    status = load_current_job_status(store, job_id)
     if status is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    return JobResponse.model_validate(status_with_current_progress(store, job_id, status))
+    return JobResponse.model_validate(status)
