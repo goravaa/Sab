@@ -40,9 +40,13 @@ reindexing the dataset.
 
 Compose mounts the workspace read-only and binds the API to `127.0.0.1:8000`
 by default. Set `DATASET_ENGINE_BIND` only when a trusted reverse proxy or
-other access control protects the service. Set embedding endpoint and AWS
-credentials in the environment used by Compose, or use an AWS role available
-to the container.
+other access control protects the service. On AWS, leave AWS credentials out
+of Compose so the container can use its instance role through IMDS. For local
+AWS credentials, put `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and (when
+using temporary credentials) `AWS_SESSION_TOKEN` in an untracked
+`.aws-credentials.env` file in this directory; Compose loads it only when the
+file exists. Do not create an empty credential file, since empty credential
+variables can override the standard AWS credential chain.
 The image includes the engine and API dependencies but does not include
 workspace secrets or local configuration.
 
