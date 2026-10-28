@@ -17,7 +17,7 @@ from main.document.structured_data import tabular
 from main.document.unstructured_data import documents as unstructured
 from main.process.config import DatasetConfig, SourceConfig
 from main.schema.document import Document, SourceType
-from main.schema.job import ManifestEntry
+from main.schema.job import DiffAction, ManifestEntry
 
 
 ALL_S3_EXTENSIONS = (
@@ -230,6 +230,39 @@ class SourceLoader:
                 source,
                 namespace=metadata["namespace"],
             )
+
+    def load_batch(self, entries: list[ManifestEntry]) -> dict[str, list[Document]]:
+        """Resolve database entries in one query per source table."""
+        from collections import defaultdict
+
+        groups: dict[tuple[str, str], list[ManifestEntry]] = defaultdict(list)
+        result: dict[str, list[Document]] = {}
+        for entry in entries:
+            if entry.action == DiffAction.DELETED:
+                continue
+            if entry.source_type == SourceType.DB_ROW:
+                groups[(entry.metadata["source_name"], entry.metadata["table"])].append(entry)
+            else:
+                result[entry.doc_id] = list(self.load(entry))
+
+        for (source_name, table), group in groups.items():
+            connector = self.connectors[source_name]
+            primary_keys = tuple(group[0].metadata["primary_keys"])
+            key_values = [
+                {key: _restore_key_value(value) for key, value in entry.metadata["key_values"].items()}
+                for entry in group
+            ]
+            rows = connector.fetch_rows(table, key_values, primary_keys=primary_keys)
+            for entry, keys in zip(group, key_values):
+                row = rows.get(tuple(keys[key] for key in primary_keys))
+                if row is None:
+                    raise KeyError(f"row in {table!r} with key {keys!r} no longer exists")
+                result[entry.doc_id] = [database_documents.row_to_document(
+                    row, namespace=entry.metadata["namespace"],
+                    schema=entry.metadata["schema"], table=table.rsplit(".", 1)[-1],
+                    primary_keys=primary_keys,
+                )]
+        return result
 
 
 def _parse_datetime(value: str | None) -> datetime | None:

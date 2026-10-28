@@ -39,7 +39,7 @@ services:
               capabilities: [gpu]
 
   dataset-engine:
-    image: ${DATASET_ENGINE_IMAGE:-garvw/sab-dataset-engine:2026.10.27}
+    image: ${DATASET_ENGINE_IMAGE:-garvw/sab-dataset-engine:2026.10.28}
     restart: unless-stopped
     depends_on:
       vllm:

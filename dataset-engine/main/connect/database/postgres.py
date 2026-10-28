@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
 from typing import Any
+import time
 from uuid import uuid4
 
 from main.schema.service import DatabaseConfig
@@ -55,16 +56,24 @@ class PostgresConnector:
             assert self.config.password is not None
             password = self.config.password.get_secret_value()
 
-        connection = psycopg.connect(
-            host=self.config.host,
-            port=self.config.port,
-            dbname=self.config.database,
-            user=self.config.username,
-            password=password,
-            connect_timeout=self.connect_timeout,
-            row_factory=dict_row,
-            **options,
-        )
+        connection = None
+        for attempt in range(4):
+            try:
+                connection = psycopg.connect(
+                    host=self.config.host,
+                    port=self.config.port,
+                    dbname=self.config.database,
+                    user=self.config.username,
+                    password=password,
+                    connect_timeout=self.connect_timeout,
+                    row_factory=dict_row,
+                    **options,
+                )
+                break
+            except psycopg.OperationalError:
+                if attempt == 3:
+                    raise
+                time.sleep(0.5 * (2 ** attempt))
         # The engine only inspects source data; each connection is explicitly
         # placed in read-only mode to guard against accidental writes.
         connection.execute("SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY")
@@ -191,6 +200,28 @@ class PostgresConnector:
             )
 
         return row
+
+    def fetch_rows(
+        self, table: str, rows: list[Mapping[str, Any]], *, primary_keys: tuple[str, ...]
+    ) -> dict[tuple[Any, ...], dict[str, Any]]:
+        """Fetch a batch of rows on one read-only connection."""
+        if not rows:
+            return {}
+        from psycopg import sql
+
+        schema, name = self._qualified_table(table)
+        predicate = sql.SQL(" OR ").join(
+            sql.SQL("({})").format(sql.SQL(" AND ").join(
+                sql.SQL("{} = %s").format(sql.Identifier(key)) for key in primary_keys
+            )) for _ in rows
+        )
+        query = sql.SQL("SELECT * FROM {} WHERE {}").format(
+            self._identifier(schema, name), predicate
+        )
+        params = tuple(row[key] for row in rows for key in primary_keys)
+        with self._connect() as connection:
+            fetched = connection.execute(query, params).fetchall()
+        return {tuple(row[key] for key in primary_keys): row for row in fetched}
 
     def iter_rows(self, table: str, *, batch_size: int = 1000) -> Iterator[dict[str, Any]]:
         """Yield table rows in primary-key order using a server-side cursor.

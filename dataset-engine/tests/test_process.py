@@ -274,6 +274,27 @@ def test_processor_leaves_state_untouched_when_embedding_fails():
     assert identifiers["src-modified"].doc_ids == ["old-doc"]
 
 
+def test_processor_resumes_batches_from_receipts_without_loading_sources():
+    store = MemoryDatasetStore()
+    manifest = JobManifest(
+        job_id="job-resume", dataset="demo", created_at="2026-10-22T00:00:00+00:00",
+        entries=[_entry("src-new", "sig-new", DiffAction.NEW)],
+    )
+    writer = MemoryChunkWriter()
+    processor = JobProcessor(
+        config=_config(), store=store, writer=writer, embedder=FakeEmbedder(),
+        document_loader=lambda entry: [_document("new-doc")],
+    )
+    processor.run(manifest)
+
+    resumed = JobProcessor(
+        config=_config(), store=store, writer=writer, embedder=FakeEmbedder(),
+        document_loader=lambda entry: (_ for _ in ()).throw(AssertionError("batch was reloaded")),
+    ).run(manifest)
+    assert resumed.completed_batches == 1
+    assert load_identifiers(store)["src-new"].doc_ids == ["new-doc"]
+
+
 def test_first_run_prepare_and_process_produces_queryable_state():
     store = MemoryDatasetStore()
     source = SourceConfig(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import warnings
 
 from collections.abc import Callable, Iterable, Mapping
@@ -202,12 +203,23 @@ class JobProcessor:
         ):
             batch = manifest.entries[start:start + self.item_batch_size]
             end = start + len(batch)
-
-            records, removed = self._process_batch(
-                manifest.job_id,
-                batch,
-                config_hash,
-            )
+            key = receipt_key(manifest.job_id, batch_number)
+            saved = self.store.read_bytes(key)
+            receipt_data = None
+            if saved is not None:
+                try:
+                    candidate = BatchReceipt.model_validate_json(saved)
+                    if (candidate.batch_number == batch_number and
+                        candidate.start_index == start and candidate.end_index == end and
+                        candidate.item_count == len(batch) and len(candidate.records) + len(candidate.removed) == len(batch)):
+                        receipt_data = candidate
+                except Exception:
+                    receipt_data = None
+            if receipt_data is not None:
+                records = {row["source_id"]: IdentifierRecord(**row) for row in receipt_data.records}
+                removed = set(receipt_data.removed)
+            else:
+                records, removed = self._process_batch(manifest.job_id, batch, config_hash)
             updates.update(records)
             deleted.update(removed)
 
@@ -217,11 +229,11 @@ class JobProcessor:
                 end_index=end,
                 item_count=len(batch),
                 processed_at=datetime.now(timezone.utc),
+                records=[record.__dict__ for record in records.values()],
+                removed=sorted(removed),
             )
-            self.store.write_bytes(
-                receipt_key(manifest.job_id, batch_number),
-                receipt.model_dump_json(indent=2).encode("utf-8"),
-            )
+            if receipt_data is None:
+                self.store.write_bytes(key, receipt.model_dump_json(indent=2).encode("utf-8"))
 
             progress = JobProgress(
                 total_items=len(manifest.entries),
@@ -281,12 +293,15 @@ class JobProcessor:
         doc_ids_by_source: dict[str, list[str]] = {}
         removed: set[str] = set()
 
+        batch_loader = getattr(getattr(self.document_loader, "__self__", None), "load_batch", None)
+        loaded = batch_loader(entries) if batch_loader else None
+
         for entry in entries:
             if entry.action == DiffAction.DELETED:
                 removed.add(entry.doc_id)
                 continue
 
-            documents = list(self.document_loader(entry))
+            documents = loaded[entry.doc_id] if loaded is not None else list(self.document_loader(entry))
             doc_ids_by_source[entry.doc_id] = [
                 document.doc_id for document in documents
             ]

@@ -54,6 +54,8 @@ class BatchReceipt(BaseModel):
     end_index: int = Field(ge=0)
     item_count: int = Field(ge=0)
     processed_at: datetime
+    records: list[dict[str, Any]] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
 
 
 class JobProgress(BaseModel):
