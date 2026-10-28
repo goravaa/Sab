@@ -50,7 +50,7 @@ services:
   #   SAB_EMBED_MODEL=BAAI/bge-m3
   # Leave SAB_EMBED_MODEL empty to use the embedder named in workspace.yaml.
   dataset-engine:
-    image: ${DATASET_ENGINE_IMAGE:-garvw/sab-dataset-engine:2026.10.29}
+    image: ${DATASET_ENGINE_IMAGE:-garvw/sab-dataset-engine:e7aac475a6805b9ae86b8347eb2e655055c9fac1}
     restart: unless-stopped
     ports:
       - "${DATASET_ENGINE_BIND:-127.0.0.1}:${DATASET_ENGINE_PORT:-8000}:8000"
