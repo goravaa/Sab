@@ -8,6 +8,7 @@ import io
 import json
 import os
 import random
+import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
@@ -686,6 +687,10 @@ def main() -> None:
     print(f"Generating {args.customers:,} customers with random seed {args.seed}...", flush=True)
     data = build_data(args.seed, args.customers)
     output = OUTPUT_ROOT / f"seed-{args.seed:04d}"
+    # Regeneration at a smaller scale must not retain files from an older run.
+    # This path is a seed-specific generated artifact directory, not source data.
+    if output.exists():
+        shutil.rmtree(output)
     files = create_local_files(data, output)
     print(f"Generated {len(files):,} files in {output}", flush=True)
 
