@@ -58,29 +58,29 @@ it cannot query arbitrary S3 paths or alter the dataset.
 
 ## Configure and run
 
-Install dependencies in Python 3.10+ and set the dataset and embedding
-endpoint. AWS access uses the AWS SDK credential chain unless explicit S3
-credentials are supplied through environment variables.
+Install dependencies in Python 3.10+. Configuration is central: the service
+reads the same `workspace.yaml` dataset-engine uses, resolvable through
+`SAB_WORKSPACE` or checked-out relative locations (`config/workspace.yaml`,
+next to it in `../dataset-engine`). From it, query-service derives the
+dataset name, bucket, prefix, region, and the optional `embeddings:` /
+`query:` sections. No dataset-related environment variables are required.
 
 ```sh
 python -m pip install -r requirements.txt
-cp .env.example .env
-set -a && source .env && set +a
-python mcp_server.py
+python mcp_server.py   # resolves workspace.yaml; set SAB_WORKSPACE otherwise
 ```
 
-The default sample target is `sab-data/sab-datasets/ui-smoke-173645` in
-`us-west-2`. Change `SAB_DATASET_BUCKET`, `SAB_DATASET_NAME`,
-`SAB_DATASET_PREFIX`, or `SAB_DATASET_REGION` for another dataset.
+Connection precedence: workspace.yaml first; bucket discovery from
+`SAB_DATASET_BUCKET` as a fallback for deployments without a workspace file
+(a unique committed dataset is selected automatically); the legacy
+`sab-data/sab-datasets/ui-smoke-173645` sample variables still apply last.
 
-`SAB_EMBED_BASE_URL` must serve the same embedding model recorded in the
-dataset config. The example uses local Ollama `all-minilm`; when the MCP server
-runs on Chotu, point it at an embedding endpoint reachable from Chotu that
-serves the matching model. A GPU host running vLLM can serve this through its
-OpenAI-compatible `/v1/embeddings` endpoint; set `SAB_EMBED_API_KEY` to its
-configured key and use the same model name as the dataset config. The vLLM chat
-model does not need to be called by Sab; the MCP host model receives tool
-results and writes the answer.
+Embedding endpoint precedence: `SAB_EMBED_BASE_URL`/`SAB_EMBED_API_KEY`
+environment overrides (deployment glue, e.g. pointing both services at vLLM
+under `--profile gpu`), then the `embeddings:` section of workspace.yaml,
+then `http://localhost:11434/v1` with key `ollama`. The model name requested
+still comes from the dataset's committed `config.json` unless workspace.yaml
+`embeddings.model` overrides it (e.g. serving the model under an alias).
 
 The dataset-engine Compose stack starts vLLM with `BAAI/bge-m3` and maps it to
 `127.0.0.1:8001` on the host. For a query service running directly on that
@@ -89,8 +89,25 @@ host, set `SAB_EMBED_BASE_URL=http://127.0.0.1:8001/v1` and use the same
 network can use `http://vllm:8000/v1` instead.
 
 The default transport is MCP stdio, where the host starts `mcp_server.py` as a
-subprocess. Streamable HTTP can be added for remote clients when deployment and
-authentication are ready.
+subprocess. Containerized deployments set `SAB_MCP_TRANSPORT=streamable-http`
+(and optionally `SAB_MCP_HOST`/`SAB_MCP_PORT`) to serve MCP over HTTP.
+
+## Docker
+
+```sh
+docker build -t garvw/sab-query-service:<tag> .
+docker run --rm -p 8080:8080 \
+  -e AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / instance role \
+  -e SAB_WORKSPACE=/app/config/workspace.yaml \
+  -v /path/to/workspace.yaml:/app/config/workspace.yaml:ro \
+  -e SAB_EMBED_BASE_URL=http://host.docker.internal:8001/v1 \
+  -e SAB_MCP_TRANSPORT=streamable-http \
+  garvw/sab-query-service:<tag>
+```
+
+Without `SAB_WORKSPACE`, a bare container uses `SAB_DATASET_BUCKET`
+(discovery) as fallback.
+
 
 ## OpenCode
 
@@ -107,10 +124,7 @@ reachable from the Chotu instance:
       "command": ["/path/to/query-service/env/bin/python", "/path/to/query-service/mcp_server.py"],
       "cwd": "/path/to/query-service",
       "environment": {
-        "SAB_DATASET_BUCKET": "sab-data",
-        "SAB_DATASET_NAME": "ui-smoke-173645",
-        "SAB_DATASET_PREFIX": "sab-datasets",
-        "SAB_DATASET_REGION": "us-west-2",
+        "SAB_WORKSPACE": "/path/to/dataset-engine/config/workspace.yaml",
         "SAB_EMBED_BASE_URL": "http://127.0.0.1:11434/v1",
         "SAB_EMBED_API_KEY": "ollama"
       },
@@ -120,10 +134,19 @@ reachable from the Chotu instance:
 }
 ```
 
-The Ollama endpoint above is an example for a host running Ollama locally.
-Chotu needs a matching `all-minilm` embedding endpoint; its Qwen chat endpoint
-does not replace the embedding model. OpenCode starts local MCP servers over
-stdio and accepts a per-server environment and timeout in its [MCP
-configuration](https://opencode.ai/docs/en/mcp-servers/).
-For a local AWS profile, add `AWS_PROFILE` to the server's `environment`; some
-MCP hosts do not pass the parent shell environment through automatically.
+`SAB_WORKSPACE` is optional when the two checkouts sit side by side (the
+loader falls back to `../dataset-engine/config/workspace.yaml`); the embedding
+endpoint is the only environment value normally worth pinning for a host-run
+server.
+
+The Ollama endpoint above is an example for a host running Ollama locally;
+use an endpoint serving the model recorded in the dataset's committed
+`config.json` (`ollama cp bge-m3 BAAI/bge-m3` keeps the served name matching).
+Chotu needs a matching embedding endpoint; its Qwen chat endpoint does not
+replace the embedding model. OpenCode starts local MCP servers over stdio and
+accepts a per-server environment and timeout in its [MCP
+configuration](https://opencode.ai/docs/en/mcp-servers/). Every `/v1`
+environment variable, including `SAB_EMBED_BASE_URL`, must be reachable from
+where the server runs. For a local AWS profile, add `AWS_PROFILE` to the
+server's `environment`; some MCP hosts do not pass the parent shell
+environment through automatically.

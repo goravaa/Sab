@@ -1,0 +1,41 @@
+# Root Compose stack: dataset-engine + query-service (+ vLLM via the GPU
+# profile defined in dataset-engine/compose.yaml, included below).
+#
+# Decoupling rules this file must not break:
+# - dataset-engine still speaks only SAB_WORKSPACE + runtime secrets.
+# - query-service still speaks only bucket discovery: it receives no config
+#   file, so a future multi-host layout needs only this env block.
+# - Remove a service and the other keeps working; each image also runs
+#   standalone (see dataset-engine/README.md and query-service/README.md).
+#
+# The root .env carries the small amount of deployment glue where the two
+# services meet: the dataset bucket, and one embedding endpoint shared by
+# indexing (dataset-engine) and semantic_search (query-service).
+
+include:
+  - dataset-engine/compose.yaml
+
+services:
+  query-service:
+    image: ${QUERY_SERVICE_IMAGE:-garvw/sab-query-service:2026.10.27}
+    restart: unless-stopped
+    ports:
+      - "${QUERY_SERVICE_BIND:-127.0.0.1}:${QUERY_SERVICE_PORT:-8080}:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      # workspace.yaml is the single central config; query-service derives
+      # the dataset target from it directly (no SAB_DATASET_* needed).
+      SAB_WORKSPACE: /app/config/workspace.yaml
+      SAB_MCP_TRANSPORT: ${SAB_MCP_TRANSPORT:-streamable-http}
+      # SAB_EMBED_BASE_URL/KEY remain env-only deployment overrides (e.g.
+      # http://vllm:8000/v1 under --profile gpu); unset uses workspace.yaml.
+      SAB_EMBED_BASE_URL: ${SAB_EMBED_BASE_URL:-http://host.docker.internal:11434/v1}
+      SAB_EMBED_API_KEY: ${SAB_EMBED_API_KEY:-}
+      SAB_SQL_MEMORY_LIMIT: ${SAB_SQL_MEMORY_LIMIT:-}
+      SAB_SQL_THREADS: ${SAB_SQL_THREADS:-}
+    volumes:
+      - ./dataset-engine/config/workspace.yaml:/app/config/workspace.yaml:ro
+    env_file:
+      - path: ./dataset-engine/.aws-credentials.env
+        required: false

@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+mypy_cache/
+.env
+env/
+thoughts/
+api/
+Dockerfile
+.dockerignore
+README.md

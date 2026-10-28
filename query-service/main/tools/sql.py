@@ -13,6 +13,7 @@ from typing import Any
 from ..dataset import open_dataset
 from .catalog import _logical_type, _merge_types
 from .dataset import configured_connection
+from ..workspace import sql_settings
 
 
 MAX_RESULT_ROWS = 100
@@ -221,13 +222,14 @@ def _query_open_dataset(
             yield pa.RecordBatch.from_pylist(pending, schema=schema)
 
     reader = pa.RecordBatchReader.from_batches(schema, batches())
-    memory_limit = os.getenv("SAB_SQL_MEMORY_LIMIT", "512MB").upper()
+    limits = sql_settings()
+    memory_limit = limits["memory_limit"].upper()
     if not re.fullmatch(r"\d+(KB|MB|GB|TB)", memory_limit):
-        raise ValueError("SAB_SQL_MEMORY_LIMIT must be a size such as 512MB or 2GB")
+        raise ValueError("sql_memory_limit must be a size such as 512MB or 2GB")
     try:
-        threads = int(os.getenv("SAB_SQL_THREADS", "2"))
+        threads = int(limits["threads"])
     except ValueError as exc:
-        raise ValueError("SAB_SQL_THREADS must be an integer from 1 to 16") from exc
+        raise ValueError("sql_threads must be an integer from 1 to 16") from exc
     if not 1 <= threads <= 16:
         raise ValueError("SAB_SQL_THREADS must be an integer from 1 to 16")
 

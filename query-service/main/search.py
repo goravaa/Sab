@@ -1,11 +1,10 @@
 """Question embedding and committed-chunk retrieval."""
 
 from __future__ import annotations
-
-import os
 from typing import Any
 
 from .dataset import OpenDataset
+from .workspace import embed_settings
 
 
 class SearchError(RuntimeError):
@@ -16,9 +15,10 @@ def embed_query(text: str, model: str) -> list[float]:
     try:
         from openai import OpenAI
 
+        settings = embed_settings()
         client = OpenAI(
-            api_key=os.getenv("SAB_EMBED_API_KEY") or os.getenv("OPENAI_API_KEY") or "ollama",
-            base_url=os.getenv("SAB_EMBED_BASE_URL") or None,
+            api_key=settings["api_key"] or "ollama",
+            base_url=settings["base_url"],
             timeout=45,
         )
         result = client.embeddings.create(model=model, input=[text])
@@ -33,7 +33,10 @@ def embed_query(text: str, model: str) -> list[float]:
 
 
 def search_chunks(dataset: OpenDataset, question: str, *, limit: int = 6) -> list[dict[str, Any]]:
-    model = dataset.config.get("data_model", {}).get("embedder", {}).get("model")
+    model = (
+        embed_settings()["model"]
+        or dataset.config.get("data_model", {}).get("embedder", {}).get("model")
+    )
     if not model:
         raise SearchError("Dataset config does not specify an embedding model")
     vector = embed_query(question, model)

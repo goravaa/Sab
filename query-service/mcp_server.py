@@ -1,5 +1,7 @@
 """MCP entrypoint for Sab's read-only indexed-data operations."""
 
+import os
+
 from mcp.server.fastmcp import FastMCP
 
 from main.tools import (
@@ -9,6 +11,7 @@ from main.tools import (
     find_rows,
     inspect_dataset,
     keyword_search,
+    list_datasets,
     list_tables,
     query_sql,
     semantic_search,
@@ -17,9 +20,10 @@ from main.tools import (
 mcp = FastMCP(
     "sab-data",
     instructions=(
-        "Use inspect_dataset and audit_integrity to understand index state. "
-        "Use keyword_search for literal terms without embeddings, semantic_search "
-        "for meaning-based retrieval, find_rows for exact "
+        "Use list_datasets to enumerate committed datasets in the target bucket when "
+        "one is not configured. Use inspect_dataset and audit_integrity to understand "
+        "index state. Use keyword_search for literal terms without embeddings, "
+        "semantic_search for meaning-based retrieval, find_rows for exact "
         "row lookups, and analyze_rows for simple exact aggregates. For SQL, call "
         "list_tables and describe_table to inspect structured tables, then query_sql "
         "for read-only SQL over all committed chunks exposed as `data`. Filter by "
@@ -35,6 +39,7 @@ mcp = FastMCP(
     ),
 )
 
+mcp.tool()(list_datasets)
 mcp.tool()(inspect_dataset)
 mcp.tool()(audit_integrity)
 mcp.tool()(list_tables)
@@ -47,4 +52,10 @@ mcp.tool()(query_sql)
 
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    transport = os.getenv("SAB_MCP_TRANSPORT", "stdio")
+    if transport == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        mcp.settings.host = os.getenv("SAB_MCP_HOST", mcp.settings.host)
+        mcp.settings.port = int(os.getenv("SAB_MCP_PORT", mcp.settings.port))
+        mcp.run(transport=transport)

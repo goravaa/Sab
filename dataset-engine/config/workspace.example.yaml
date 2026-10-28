@@ -51,3 +51,13 @@ data_model:
   embedder:
     model: BAAI/bge-m3
 # item_batch_size: 1000
+
+# Query-service reads these central sections at query time; dataset-engine
+# ignores every key it does not use.
+# embeddings:
+#   base_url: http://host.docker.internal:11434/v1
+#   api_key: ${VLLM_API_KEY}     # env expansion, like other fields
+#   model: BAAI/bge-m3           # optional override of the served model name
+# query:
+#   sql_memory_limit: 512MB
+#   sql_threads: 2
