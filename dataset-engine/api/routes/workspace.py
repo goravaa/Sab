@@ -6,8 +6,13 @@ from fastapi import APIRouter, HTTPException
 
 from api.logging_config import get_logger
 from api.routes.jobs import job_stream_response
-from api.schemas import JobSubmitRequest
-from api.services.jobs import create_job
+from api.schemas import JobResponse, JobSubmitRequest
+from api.services.jobs import (
+    create_job,
+    load_job_status,
+    status_with_current_progress,
+    store_for,
+)
 from api.services.job_lock import DatasetJobLock, JobAlreadyRunning
 from api.services.workspace import reconcile_workspace, workspace_status
 from main.process.workspace import (
@@ -87,6 +92,11 @@ async def stream_workspace_job():
     except JobAlreadyRunning as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
+        job_lock.update({
+            "dataset": config.dataset,
+            "target_uri": config.target.uri,
+            "status": "preparing",
+        })
         job_id, job_config, store, initial_status = create_job(
             request,
             data_model=config.data_model,
@@ -102,3 +112,42 @@ async def stream_workspace_job():
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return job_stream_response(job_id, job_config, store, initial_status, job_lock)
+
+
+@router.get("/jobs/active")
+def get_active_workspace_job() -> dict:
+    """Return the host's active job, including progress persisted in S3."""
+
+    active = DatasetJobLock.read_active()
+    if active is None:
+        return {"job": None}
+
+    job_id = active.get("id")
+    config = _load()
+    if not job_id:
+        return {"job": active}
+    if (
+        active.get("dataset") != config.dataset
+        or active.get("target_uri") != config.target.uri
+    ):
+        return {"job": active}
+
+    store = store_for(config.target, config.dataset)
+    status = load_job_status(store, job_id)
+    if status is None:
+        return {"job": active}
+    return {
+        "job": status_with_current_progress(store, job_id, status),
+    }
+
+
+@router.get("/jobs/{job_id}", response_model=JobResponse)
+def get_workspace_job_status(job_id: str) -> JobResponse:
+    """Read a workspace job's status without requiring browser credentials."""
+
+    config = _load()
+    store = store_for(config.target, config.dataset)
+    status = load_job_status(store, job_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JobResponse.model_validate(status_with_current_progress(store, job_id, status))

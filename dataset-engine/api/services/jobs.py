@@ -101,7 +101,12 @@ def run_job_background(
         status.update(status="running", updated_at=datetime.now(timezone.utc).isoformat())
         write_status(store, status)
         if job_lock is not None:
-            job_lock.update({"id": job_id, "dataset": config.dataset, "status": "running"})
+            job_lock.update({
+                "id": job_id,
+                "dataset": config.dataset,
+                "target_uri": config.target.uri if config.target is not None else None,
+                "status": "running",
+            })
         logger.info("job started job_id=%s dataset=%s", job_id, config.dataset)
         try:
             progress = run_job(job_id=job_id, config=config, target=config.target)
@@ -141,10 +146,13 @@ def progress_from_receipts(
     total_items: int,
 ) -> JobProgress:
     keys = sorted(store.list_keys(f"jobs/{job_id}/progress/"))
-    processed = 0
-    for key in keys:
-        receipt = json.loads(store.read_bytes(key) or b"{}")
-        processed = max(processed, int(receipt.get("end_index", 0)))
+    latest = max(
+        keys,
+        key=lambda key: int(key.rsplit("_", 1)[-1].removesuffix(".json")),
+        default=None,
+    )
+    receipt = json.loads(store.read_bytes(latest) or b"{}") if latest else {}
+    processed = int(receipt.get("end_index", 0))
     return JobProgress(
         total_items=total_items,
         processed_items=processed,

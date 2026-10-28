@@ -52,7 +52,9 @@ workspace secrets or local configuration.
 
 The normal UI path is workspace-driven. Edit `config/workspace.yaml` with
 your dataset, target bucket, and any number of source systems, then reload the
-page. The API reads the file on every request, so no restart is needed.
+page. The API reads the file on every request, so no restart is needed. If the
+page is refreshed during indexing, it restores the active job and resumes
+showing progress from the saved job receipts.
 
 ```yaml
 dataset: personal

@@ -20,12 +20,16 @@ class DatasetJobLock:
     def __init__(self, descriptor: int) -> None:
         self._descriptor: int | None = descriptor
 
-    @classmethod
-    def acquire(cls) -> "DatasetJobLock":
-        path = Path(os.getenv(
+    @staticmethod
+    def _path() -> Path:
+        return Path(os.getenv(
             "SAB_JOB_LOCK_PATH",
             str(Path(tempfile.gettempdir()) / "sab-dataset-engine-index.lock"),
         ))
+
+    @classmethod
+    def acquire(cls) -> "DatasetJobLock":
+        path = cls._path()
         path.parent.mkdir(parents=True, exist_ok=True)
         descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
@@ -34,6 +38,31 @@ class DatasetJobLock:
             os.close(descriptor)
             raise JobAlreadyRunning("An indexing job is already running") from exc
         return cls(descriptor)
+
+    @classmethod
+    def read_active(cls) -> dict[str, Any] | None:
+        """Read metadata only while another process holds the job lock."""
+
+        try:
+            descriptor = os.open(cls._path(), os.O_RDWR)
+        except FileNotFoundError:
+            return None
+        try:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                os.lseek(descriptor, 0, os.SEEK_SET)
+                payload = os.read(descriptor, 16_384)
+                try:
+                    value = json.loads(payload) if payload else {}
+                except json.JSONDecodeError:
+                    return {"status": "preparing"}
+                return value if isinstance(value, dict) else {"status": "preparing"}
+            else:
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+                return None
+        finally:
+            os.close(descriptor)
 
     def update(self, data: dict[str, Any]) -> None:
         if self._descriptor is None:

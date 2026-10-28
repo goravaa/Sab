@@ -2,11 +2,15 @@ const $ = (id) => document.getElementById(id);
 const reloadButton = $("reload-workspace");
 const previewButton = $("preview");
 const submitButton = $("submit-job");
+const ACTIVE_JOB_KEY = "sab-dataset-engine:last-job";
 
 let workspace = null;
 let progressSamples = [];
+let activeJobRunning = false;
+let jobPollTimer = null;
 
 function setBusy(busy) {
+  busy = busy || activeJobRunning;
   reloadButton.disabled = busy;
   previewButton.disabled = busy || !workspace;
   submitButton.disabled = busy || !workspace;
@@ -85,6 +89,109 @@ async function getJson(url) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.detail || `Request failed (${response.status})`);
   return data;
+}
+
+function saveJobReference(job) {
+  if (!job?.id || !workspace) return;
+  localStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify({
+    id: job.id,
+    dataset: workspace.dataset,
+    target_uri: workspace.target?.uri,
+  }));
+}
+
+function storedJobReference() {
+  try {
+    return JSON.parse(localStorage.getItem(ACTIVE_JOB_KEY) || "null");
+  } catch {
+    localStorage.removeItem(ACTIVE_JOB_KEY);
+    return null;
+  }
+}
+
+function showJobProgress(job, { restored = false } = {}) {
+  const status = job.status || "running";
+  const progress = job.progress || {};
+  const running = ["preparing", "pending", "running"].includes(status);
+  activeJobRunning = running;
+  $("progress-area").hidden = false;
+  renderDiff(job.diff || {});
+  $("result-title").textContent = running ? "Indexing dataset" : status === "completed" ? "Indexing complete" : "Indexing failed";
+  $("result-badge").textContent = running ? status === "preparing" ? "Preparing" : "Running" : status === "completed" ? "Complete" : "Failed";
+  $("result-badge").className = `badge ${running ? "running" : status === "completed" ? "done" : "failed"}`;
+  const ratio = Math.min(1, Math.max(0, Number(progress.ratio || 0)));
+  $("progress-bar").value = ratio;
+  $("progress-value").textContent = `${Math.round(ratio * 100)}%`;
+  $("progress-label").textContent = `${formatNumber(progress.processed_items)} of ${formatNumber(progress.total_items)} items`;
+
+  if (status === "preparing") {
+    $("job-message").textContent = "Scanning configured sources and preparing batches.";
+    $("progress-eta").textContent = "ETA starts after the source scan.";
+  } else if (running) {
+    $("job-message").textContent = `${formatNumber(progress.completed_batches)} batches completed.${restored ? " Restored after page reload." : ""}`;
+    updateProgressEta(progress);
+  } else if (status === "completed") {
+    $("progress-bar").value = 1;
+    $("progress-value").textContent = "100%";
+    $("job-message").textContent = "The dataset is ready to query.";
+    $("progress-eta").textContent = "Complete";
+  } else {
+    $("job-message").textContent = job.error || "The job failed.";
+    $("progress-eta").textContent = "ETA unavailable because indexing failed.";
+  }
+  setBusy(false);
+  if (status === "failed") showError(job.error || "The indexing job failed.");
+}
+
+function scheduleJobPoll(callback) {
+  if (jobPollTimer) clearTimeout(jobPollTimer);
+  jobPollTimer = setTimeout(callback, 1500);
+}
+
+async function pollStoredJob(jobId) {
+  if (!workspace || !activeJobRunning) return;
+  try {
+    const job = await getJson(`/v1/workspace/jobs/${encodeURIComponent(jobId)}`);
+    saveJobReference(job);
+    showJobProgress(job, { restored: true });
+    if (activeJobRunning) scheduleJobPoll(() => pollStoredJob(jobId));
+  } catch (error) {
+    showError(error.message);
+    activeJobRunning = false;
+    setBusy(false);
+  }
+}
+
+async function restoreJobAfterReload() {
+  if (!workspace) return;
+  progressSamples = [];
+  try {
+    const activeResponse = await getJson("/v1/workspace/jobs/active");
+    const active = activeResponse.job;
+    if (active) {
+      if (active.id) saveJobReference(active);
+      showJobProgress(active, { restored: true });
+      if (active.id) {
+        scheduleJobPoll(() => pollStoredJob(active.id));
+      } else if (activeJobRunning) {
+        scheduleJobPoll(restoreJobAfterReload);
+      }
+      return;
+    }
+  } catch (error) {
+    // A previously completed job can still be restored from its saved ID.
+    console.warn("Could not check for an active job", error);
+  }
+
+  const saved = storedJobReference();
+  if (!saved || saved.dataset !== workspace.dataset || saved.target_uri !== workspace.target?.uri) return;
+  try {
+    const job = await getJson(`/v1/workspace/jobs/${encodeURIComponent(saved.id)}`);
+    showJobProgress(job, { restored: true });
+    if (activeJobRunning) scheduleJobPoll(() => pollStoredJob(saved.id));
+  } catch {
+    localStorage.removeItem(ACTIVE_JOB_KEY);
+  }
 }
 
 async function postJson(url) {
@@ -233,6 +340,7 @@ async function loadWorkspace({ quiet = false } = {}) {
   try {
     const data = await getJson("/v1/workspace/status");
     renderWorkspace(data);
+    await restoreJobAfterReload();
   } catch (error) {
     resetWorkspaceView(error.message);
     showError(error.message);
@@ -285,10 +393,14 @@ submitButton.addEventListener("click", async () => {
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
       if (response.status === 409) {
-        $("result-title").textContent = "Indexing already in progress";
-        $("result-badge").textContent = "Busy";
-        $("result-badge").className = "badge running";
-        $("job-message").textContent = error.detail || "Wait for the current job to finish.";
+        await restoreJobAfterReload();
+        if (!activeJobRunning) {
+          $("result-title").textContent = "Indexing already in progress";
+          $("result-badge").textContent = "Busy";
+          $("result-badge").className = "badge running";
+          $("job-message").textContent = error.detail || "Wait for the current job to finish.";
+        }
+        return;
       }
       throw new Error(error.detail || `Request failed (${response.status})`);
     }
@@ -330,11 +442,13 @@ function handleEvent(block) {
   if (!dataLines.length) return;
   const data = JSON.parse(dataLines.join("\n"));
   if (eventName === "job") {
+    saveJobReference(data);
     renderDiff(data.diff || {});
     $("job-message").textContent = `Job ${data.id} accepted.`;
     return;
   }
   if (eventName === "progress") {
+    activeJobRunning = true;
     const progress = data.progress || {};
     const ratio = Math.min(1, Math.max(0, Number(progress.ratio || 0)));
     $("progress-bar").value = ratio;
@@ -345,6 +459,8 @@ function handleEvent(block) {
     return;
   }
   if (eventName === "completed") {
+    activeJobRunning = false;
+    saveJobReference(data);
     renderDiff(data.diff || {});
     $("result-title").textContent = "Indexing complete";
     $("result-badge").textContent = "Complete";
@@ -359,6 +475,8 @@ function handleEvent(block) {
     return;
   }
   if (eventName === "failed") {
+    activeJobRunning = false;
+    saveJobReference(data);
     $("result-title").textContent = "Indexing failed";
     $("result-badge").textContent = "Failed";
     $("result-badge").className = "badge failed";

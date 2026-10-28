@@ -43,6 +43,11 @@ def submit_job(
     except JobAlreadyRunning as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
+        job_lock.update({
+            "dataset": request.dataset,
+            "target_uri": request.target.uri,
+            "status": "preparing",
+        })
         job_id, config, _, status = create_job(request)
     except Exception as exc:
         job_lock.release()
@@ -54,6 +59,12 @@ def submit_job(
         logger.debug("job submit failure detail", exc_info=True)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+    job_lock.update({
+        "id": job_id,
+        "dataset": config.dataset,
+        "target_uri": config.target.uri if config.target is not None else None,
+        "status": "pending",
+    })
     background_tasks.add_task(run_job_background, job_id, config, job_lock)
     logger.info("job accepted job_id=%s dataset=%s", job_id, request.dataset)
     return JobResponse.model_validate(status)
@@ -67,6 +78,13 @@ def job_stream_response(
     job_lock: DatasetJobLock,
 ) -> StreamingResponse:
     """Return an SSE response that runs and reports one prepared job."""
+
+    job_lock.update({
+        "id": job_id,
+        "dataset": config.dataset,
+        "target_uri": config.target.uri if config.target is not None else None,
+        "status": "pending",
+    })
 
     async def events():
         logger.info("job stream opened job_id=%s dataset=%s", job_id, config.dataset)
@@ -130,6 +148,11 @@ async def submit_job_stream(request: JobSubmitRequest) -> StreamingResponse:
     except JobAlreadyRunning as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     try:
+        job_lock.update({
+            "dataset": request.dataset,
+            "target_uri": request.target.uri,
+            "status": "preparing",
+        })
         job_id, config, store, initial_status = create_job(request)
     except Exception as exc:
         job_lock.release()
