@@ -1,11 +1,15 @@
 services:
+  # GPU embedding stack. CPU-only deployments (e.g. the EC2 instance) skip
+  # this service entirely and use the host Ollama endpoint instead:
+  #   docker compose --profile gpu up -d
   vllm:
     image: vllm/vllm-openai:v0.32.0
     restart: unless-stopped
+    profiles: ["gpu"]
     ipc: host
     command:
       - --model
-      - ${SAB_EMBED_MODEL:-BAAI/bge-m3}
+      - ${VLLM_MODEL:-BAAI/bge-m3}
       - --runner
       - pooling
       - --pooler-config.task
@@ -38,20 +42,26 @@ services:
               count: all
               capabilities: [gpu]
 
+  # Default (no profile): talks to the host Ollama on 11434 so a CPU server
+  # needs no extra configuration. Ollama must listen on the container-bridge
+  # interface, not only loopback (see README). GPU deployments start with
+  # --profile gpu and set in .env:
+  #   SAB_EMBED_BASE_URL=http://vllm:8000/v1
+  #   SAB_EMBED_MODEL=BAAI/bge-m3
+  # Leave SAB_EMBED_MODEL empty to use the embedder named in workspace.yaml.
   dataset-engine:
-    image: ${DATASET_ENGINE_IMAGE:-garvw/sab-dataset-engine:2026.10.28}
+    image: ${DATASET_ENGINE_IMAGE:-garvw/sab-dataset-engine:2026.10.29}
     restart: unless-stopped
-    depends_on:
-      vllm:
-        condition: service_healthy
     ports:
       - "${DATASET_ENGINE_BIND:-127.0.0.1}:${DATASET_ENGINE_PORT:-8000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       SAB_WORKSPACE: /app/config/workspace.yaml
-      SAB_EMBED_MODEL: ${SAB_EMBED_MODEL:-BAAI/bge-m3}
       SAB_LOG_LEVEL: ${SAB_LOG_LEVEL:-INFO}
-      SAB_EMBED_BASE_URL: http://vllm:8000/v1
-      SAB_EMBED_API_KEY: ${VLLM_API_KEY:-local-vllm-key}
+      SAB_EMBED_BASE_URL: ${SAB_EMBED_BASE_URL:-http://host.docker.internal:11434/v1}
+      SAB_EMBED_API_KEY: ${SAB_EMBED_API_KEY:-ollama}
+      SAB_EMBED_MODEL: ${SAB_EMBED_MODEL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       AWS_REGION: ${AWS_REGION:-us-west-2}
     env_file:

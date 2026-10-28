@@ -25,18 +25,20 @@ docker compose up -d
 To build from source instead, run `docker build -t garvw/sab-dataset-engine:local .`
 and set `DATASET_ENGINE_IMAGE` to that tag.
 
-Compose starts vLLM with `BAAI/bge-m3` and connects the dataset engine to it
-over the private Compose network. Compose sets `SAB_EMBED_MODEL` for the engine,
-so it uses the same model even if the workspace file names another one. The
-supplied workspace example also sets `data_model.embedder.model: BAAI/bge-m3`.
-Set `SAB_EMBED_MODEL` in the environment if you want to serve another supported
-vLLM pooling model; the same value is sent to vLLM and the engine. The Compose
-stack waits for vLLM to finish loading the model before starting the API.
-vLLM also listens on `127.0.0.1:8001` for host-side query services. On a GPU
-host, install the NVIDIA Container Toolkit before running Compose. The model
-weights are cached in a named volume. Override `VLLM_API_KEY` to replace the
-local-only default key. Changing from another embedding model requires
-reindexing the dataset.
+Compose ships one profile-free path and one optional profile:
+
+- **CPU host with Ollama (default, e.g. the EC2 instance):** `docker compose up -d`
+  runs only the dataset engine and points `SAB_EMBED_BASE_URL` at the host
+  Ollama through `host.docker.internal:11434`. Ollama must listen on the
+  Docker bridge interface, so set `OLLAMA_HOST=0.0.0.0` in its systemd unit
+  (or one-off export) and restart it; keep port 11434 firewalled away from
+  the internet. The embedder model stays whatever `data_model.embedder.model`
+  in `workspace.yaml` names (leave `SAB_EMBED_MODEL` unset).
+- **GPU host with vLLM:** `docker compose --profile gpu up -d` additionally
+  starts vLLM with `BAAI/bge-m3`. Then set both values in the `.env` file:
+  `SAB_EMBED_BASE_URL=http://vllm:8000/v1` and `SAB_EMBED_MODEL=BAAI/bge-m3`.
+  The same model must be used for indexing and querying; changing models
+  requires reindexing.
 
 Compose mounts the workspace read-only and binds the API to `127.0.0.1:8000`
 by default. Set `DATASET_ENGINE_BIND` only when a trusted reverse proxy or
@@ -48,7 +50,11 @@ using temporary credentials) `AWS_SESSION_TOKEN` in an untracked
 file exists. Do not create an empty credential file, since empty credential
 variables can override the standard AWS credential chain.
 The image includes the engine and API dependencies but does not include
-workspace secrets or local configuration.
+workspace secrets or local configuration. Remember the container runs as the
+non-root `app` user: a workspace file with mode `0600` owned by another host
+user is unreadable inside the container; grant the container group read
+access and keep the read-only mount (`docker compose exec -T dataset-engine id`
+prints the group to own the file with).
 
 The normal UI path is workspace-driven. Edit `config/workspace.yaml` with
 your dataset, target bucket, and any number of source systems, then reload the
