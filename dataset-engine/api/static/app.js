@@ -6,6 +6,8 @@ const ACTIVE_JOB_KEY = "sab-dataset-engine:last-job";
 
 let workspace = null;
 let progressSamples = [];
+let etaJobId = null;
+let displayedEtaSeconds = null;
 let activeJobRunning = false;
 let jobPollTimer = null;
 
@@ -50,21 +52,36 @@ function updateProgressEta(progress) {
   const now = performance.now();
   const processed = Number(progress.processed_items || 0);
   progressSamples.push({ processed, at: now });
-  if (progressSamples.length > 5) progressSamples.shift();
+  if (progressSamples.length > 9) progressSamples.shift();
 
-  const first = progressSamples[0];
-  const last = progressSamples[progressSamples.length - 1];
-  const deltaItems = last.processed - first.processed;
-  const elapsedSeconds = (last.at - first.at) / 1000;
   const remainingItems = Math.max(0, Number(progress.total_items || 0) - processed);
 
   if (remainingItems === 0) {
     $("progress-eta").textContent = "Finishing up…";
-  } else if (deltaItems <= 0 || elapsedSeconds <= 0) {
+  } else if (progressSamples.length < 5 || progressSamples.at(-1).at - progressSamples[0].at < 6000) {
     $("progress-eta").textContent = "Estimating time remaining…";
   } else {
-    const itemsPerSecond = deltaItems / elapsedSeconds;
-    $("progress-eta").textContent = formatDuration(remainingItems / itemsPerSecond);
+    const rates = [];
+    for (let index = 1; index < progressSamples.length; index += 1) {
+      const previous = progressSamples[index - 1];
+      const current = progressSamples[index];
+      const elapsed = (current.at - previous.at) / 1000;
+      const completed = current.processed - previous.processed;
+      if (elapsed > 0 && completed > 0) rates.push(completed / elapsed);
+    }
+    rates.sort((a, b) => a - b);
+    if (!rates.length) {
+      $("progress-eta").textContent = "Estimating time remaining…";
+      return;
+    }
+    const medianRate = rates[Math.floor(rates.length / 2)];
+    const estimate = remainingItems / medianRate;
+    // Limit changes between polls so normal batch-to-batch variation does not
+    // make the displayed ETA jump around.
+    displayedEtaSeconds = displayedEtaSeconds === null
+      ? estimate
+      : Math.max(displayedEtaSeconds * 0.85, Math.min(displayedEtaSeconds * 1.15, estimate));
+    $("progress-eta").textContent = formatDuration(displayedEtaSeconds);
   }
 }
 
@@ -110,6 +127,11 @@ function storedJobReference() {
 }
 
 function showJobProgress(job, { restored = false } = {}) {
+  if (job.id !== etaJobId) {
+    etaJobId = job.id;
+    progressSamples = [];
+    displayedEtaSeconds = null;
+  }
   const status = job.status || "running";
   const progress = job.progress || {};
   const running = ["preparing", "pending", "running"].includes(status);
