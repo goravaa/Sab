@@ -63,10 +63,12 @@ function etaRateSuffix(itemsPerSecond) {
 function applyProgressEta(progress) {
   // The server computes ETA from persisted batch ticks, so it survives
   // page refreshes; fall back to client-side estimation before two
-  // batches of history exist.
-  const serverEta = Number(progress.eta_seconds);
+  // batches of history exist. A null eta means "no batches measured
+  // yet"; only a real zero means the run is finishing up.
+  const rawEta = progress.eta_seconds;
+  const serverEta = Number(rawEta);
   const rate = Number(progress.items_per_second);
-  if (Number.isFinite(serverEta)) {
+  if (rawEta !== null && rawEta !== undefined && Number.isFinite(serverEta)) {
     if (serverEta === 0) {
       $("progress-eta").textContent = "Finishing up…";
       return;
@@ -90,7 +92,7 @@ function updateProgressEta(progress, serverRate) {
 
   const remainingItems = Math.max(0, Number(progress.total_items || 0) - processed);
 
-  if (remainingItems === 0) {
+  if (remainingItems === 0 && Number(progress.total_items || 0) > 0) {
     $("progress-eta").textContent = "Finishing up…";
   } else if (progressSamples.length < 5 || progressSamples.at(-1).at - progressSamples[0].at < 6000) {
     $("progress-eta").textContent = "Estimating time remaining…";
