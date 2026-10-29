@@ -192,6 +192,16 @@ def test_processor_replaces_changed_sources_and_commits_identifiers():
         "src-deleted": [],
     }
     embedder = FakeEmbedder()
+    commit_observations = []
+
+    def on_committed():
+        committed = load_identifiers(store)
+        assert committed["src-modified"].job_id == "job-1"
+        assert store.exists(CONFIG_KEY)
+        # The commit point is visible before old Lance chunks are cleaned up.
+        assert "src-modified" in writer.by_source
+        commit_observations.append(True)
+
     manifest = JobManifest(
         job_id="job-1",
         dataset="demo",
@@ -209,6 +219,7 @@ def test_processor_replaces_changed_sources_and_commits_identifiers():
         writer=writer,
         embedder=embedder,
         document_loader=lambda entry: documents[entry.doc_id],
+        on_committed=on_committed,
     ).run(manifest)
 
     assert progress.processed_items == 3
@@ -221,6 +232,7 @@ def test_processor_replaces_changed_sources_and_commits_identifiers():
     assert modified_chunks[0].doc_id == "modified-doc"
     assert all(chunk.job_id == "job-1" for chunk in new_chunks + modified_chunks)
     assert all(len(chunk.embedding) == 3 for chunk in new_chunks + modified_chunks)
+    assert commit_observations == [True]
 
     assert store.exists(receipt_key("job-1", 1))
     receipt = json.loads(store.read_bytes(receipt_key("job-1", 1)))

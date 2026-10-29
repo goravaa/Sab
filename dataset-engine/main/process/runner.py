@@ -202,6 +202,7 @@ class JobProcessor:
         embedder: Any,
         document_loader: DocumentLoader | None = None,
         item_batch_size: int | None = None,
+        on_committed: Callable[[], None] | None = None,
     ) -> None:
         self.config = config
         self.store = store
@@ -212,6 +213,7 @@ class JobProcessor:
             or SourceLoader(config).load
         )
         self.item_batch_size = item_batch_size or config.item_batch_size
+        self.on_committed = on_committed
 
     def run(self, manifest: JobManifest) -> JobProgress:
         """Process every manifest entry, writing receipts as batches finish."""
@@ -292,6 +294,11 @@ class JobProcessor:
             self.config,
             target_uri=self.store.uri(""),
         )
+
+        # At this point readers can use the new dataset. Old Lance chunks may
+        # still need cleanup, but that work must not be presented as indexing.
+        if self.on_committed is not None:
+            self.on_committed()
 
         # Cleanup is best-effort: the commit already succeeded, and orphan
         # chunks are ignored by the query engine.
@@ -404,6 +411,7 @@ def run_job(
     connectors: Mapping[str, Any] | None = None,
     embed_base_url: str | None = None,
     embed_api_key: str | None = None,
+    on_committed: Callable[[], None] | None = None,
 ) -> JobProgress:
     """Prepare and run a complete job with production defaults."""
 
@@ -459,4 +467,5 @@ def run_job(
         writer=writer,
         embedder=embedder,
         document_loader=SourceLoader(config, connectors).load,
+        on_committed=on_committed,
     ).run(manifest)

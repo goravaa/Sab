@@ -99,6 +99,7 @@ def job_stream_response(
         manifest = load_manifest(store, job_id)
         previous: tuple[int, int] | None = None
         last_heartbeat = asyncio.get_running_loop().time()
+        committed_event_sent = False
 
         while True:
             await asyncio.sleep(0.5)
@@ -120,6 +121,10 @@ def job_stream_response(
                     "progress": progress.model_dump(mode="json"),
                 })
                 last_heartbeat = asyncio.get_running_loop().time()
+
+            if status.get("phase") == "cleanup" and not committed_event_sent:
+                committed_event_sent = True
+                yield _sse("committed", JobResponse.model_validate(status).model_dump(mode="json"))
 
             if status.get("status") in {"completed", "failed"}:
                 await worker

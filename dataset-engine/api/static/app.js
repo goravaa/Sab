@@ -242,6 +242,7 @@ function showJobProgress(job, { restored = false } = {}) {
   const status = job.status || "running";
   const progress = job.progress || {};
   const running = ["preparing", "pending", "running"].includes(status);
+  const committed = job.phase === "cleanup";
   activeJobRunning = running;
   $("progress-area").hidden = false;
   renderDiff(job.diff || {});
@@ -264,8 +265,18 @@ function showJobProgress(job, { restored = false } = {}) {
   if (status === "preparing") {
     $("job-message").textContent = "Scanning configured sources and preparing batches.";
     $("progress-eta").textContent = "ETA starts after the source scan.";
+  } else if (committed) {
+    $("result-title").textContent = "Dataset ready";
+    $("result-badge").textContent = "Ready · cleanup";
+    $("result-badge").className = "badge done";
+    $("progress-bar").value = 1;
+    $("progress-value").textContent = "100%";
+    $("progress-label").textContent = `${formatNumber(progress.processed_items)} of ${formatNumber(progress.total_items)} items indexed`;
+    $("job-message").textContent = "Dataset ready to query. Cleaning up old index data…";
+    $("progress-eta").textContent = "Indexing complete · cleanup in progress";
+    setTargetReady(true);
   } else if (running && progressFinished(progress)) {
-    $("job-message").textContent = "All batches processed. Committing the dataset…";
+    $("job-message").textContent = "All batches processed. Saving the dataset…";
     $("progress-eta").textContent = "Finishing up…";
   } else if (running) {
     $("job-message").textContent = `${formatNumber(progress.completed_batches)} batches completed.${restored ? " Restored after page reload." : ""}`;
@@ -459,8 +470,9 @@ function renderWorkspace(data) {
     $("target-state").className = "inline-result warning";
     $("api-state").textContent = "Workspace loaded";
   } else {
-    $("target-state").textContent = "Definition current";
+    $("target-state").textContent = "Ready to query";
     $("target-state").className = "inline-result success";
+    $("target-state").title = "The latest committed dataset is ready to query.";
     $("api-state").textContent = "Workspace loaded";
   }
 
@@ -473,6 +485,14 @@ function renderWorkspace(data) {
   }
 
   setBusy(false);
+}
+
+function setTargetReady(cleanupInProgress = false) {
+  $("target-state").textContent = "Ready to query";
+  $("target-state").className = "inline-result success";
+  $("target-state").title = cleanupInProgress
+    ? "The latest dataset commit is ready to query; old chunk cleanup is still running."
+    : "The latest committed dataset is ready to query.";
 }
 
 async function loadWorkspace({ quiet = false } = {}) {
@@ -598,11 +618,28 @@ function handleEvent(block) {
     renderProgressBars(progress);
     renderSourceProgress(progress.sources);
     if (progressFinished(progress)) {
-      $("job-message").textContent = "All batches processed. Committing the dataset…";
+      $("job-message").textContent = "All batches processed. Saving the dataset…";
     } else {
       $("job-message").textContent = `${formatNumber(progress.completed_batches)} batches completed.`;
     }
     applyProgressEta(progress);
+    return;
+  }
+  if (eventName === "committed") {
+    activeJobRunning = true;
+    const progress = data.progress || {};
+    renderProgressBars(progress);
+    $("progress-bar").value = 1;
+    $("progress-value").textContent = "100%";
+    $("progress-label").textContent = `${formatNumber(progress.processed_items)} of ${formatNumber(progress.total_items)} items indexed`;
+    renderSourceProgress(progress.sources);
+    $("result-title").textContent = "Dataset ready";
+    $("result-badge").textContent = "Ready · cleanup";
+    $("result-badge").className = "badge done";
+    $("job-message").textContent = "Dataset ready to query. Cleaning up old index data…";
+    $("progress-eta").textContent = "Indexing complete · cleanup in progress";
+    setTargetReady(true);
+    loadWorkspace({ quiet: true }).then(() => setTargetReady(true));
     return;
   }
   if (eventName === "completed") {

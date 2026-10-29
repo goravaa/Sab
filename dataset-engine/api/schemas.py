@@ -34,6 +34,7 @@ class JobResponse(BaseModel):
     id: str
     dataset: str
     status: JobStatus
+    phase: str | None = None
     progress: JobProgress
     diff: DiffSummary | None = None
     error: str | None = None

@@ -116,7 +116,34 @@ def run_job_background(
             })
         logger.info("job started job_id=%s dataset=%s", job_id, config.dataset)
         try:
-            progress = run_job(job_id=job_id, config=config, target=config.target)
+            def mark_committed() -> None:
+                manifest = load_manifest(store, job_id)
+                if manifest is not None:
+                    status["progress"] = granular_progress(
+                        store, job_id, manifest
+                    ).model_dump(mode="json")
+                status.update(
+                    phase="cleanup",
+                    updated_at=datetime.now(timezone.utc).isoformat(),
+                )
+                try:
+                    write_status(store, status)
+                except Exception:
+                    # The data commit has already succeeded. Failure to persist
+                    # this UI hint must not turn a committed dataset into a
+                    # failed job or skip old-chunk cleanup.
+                    logger.exception(
+                        "could not persist committed phase job_id=%s dataset=%s",
+                        job_id,
+                        config.dataset,
+                    )
+
+            progress = run_job(
+                job_id=job_id,
+                config=config,
+                target=config.target,
+                on_committed=mark_committed,
+            )
             # Persist a final granular breakdown, from the manifest the
             # runner actually processed, so completed states keep the
             # per-source view after a refresh.
@@ -125,6 +152,7 @@ def run_job_background(
                 progress = granular_progress(store, job_id, manifest)
             status.update(
                 status="completed",
+                phase="complete",
                 progress=progress.model_dump(mode="json"),
                 updated_at=datetime.now(timezone.utc).isoformat(),
             )
