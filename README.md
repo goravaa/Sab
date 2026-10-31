@@ -1,4 +1,4 @@
-# sab
+# Sab
 
 Index data you own into S3, then ask questions about the committed dataset
 through MCP. The indexer and query service run as Docker containers, and you
