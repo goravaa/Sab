@@ -32,6 +32,8 @@ The root Compose stack defaults to the matching 0.1.0 images; set
 `DATASET_ENGINE_IMAGE` or `QUERY_SERVICE_IMAGE` to override them.
 
 See [CHANGELOG.md](CHANGELOG.md) for the v0.1.0 release notes.
+Maintainers can find Docker Hub setup and release steps in
+[docs/releasing.md](docs/releasing.md).
 
 ## Quickstart: both services on one machine
 

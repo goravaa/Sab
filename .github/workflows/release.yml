@@ -2,6 +2,11 @@ name: Release Docker images
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Image version to publish (without the v prefix)
+        required: true
+        type: string
   push:
     tags:
       - "v*.*.*"
@@ -31,6 +36,7 @@ jobs:
           images: garvw/sab-dataset-engine
           tags: |
             type=semver,pattern={{version}}
+            type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
             type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
 
       - name: Build and publish dataset-engine
@@ -49,6 +55,7 @@ jobs:
           images: garvw/sab-query-service
           tags: |
             type=semver,pattern={{version}}
+            type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
             type=raw,value=latest,enable=${{ !contains(github.ref, '-') }}
 
       - name: Build and publish query-service
@@ -63,4 +70,5 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.version && format('v{0}', inputs.version) || github.ref_name }}
           body_path: RELEASE_NOTES.md
