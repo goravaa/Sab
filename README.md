@@ -1,58 +1,94 @@
-# Sab
+# sab
 
-Sab indexes data sources into S3 datasets (dataset-engine) and queries the
-committed, verified index read-only (query-service).
+Index data you own into S3, then ask questions about the committed dataset
+through MCP. The indexer and query service run as Docker containers, and you
+choose the AWS account, embedding endpoint, and MCP host they use.
 
-## v0.1.0 capabilities and limits
+## Working demo
 
-This release ships two Docker images, both tagged `0.1.0`:
+[Watch the Sab demo](https://youtu.be/g98wnnadK9I)
 
-- `garvw/sab-dataset-engine:0.1.0` indexes configured PostgreSQL tables and
-  S3 objects into a committed S3 dataset. S3 inputs support CSV, XLSX/XLSM,
-  PDF, DOCX, Markdown, and plain text. PostgreSQL password and Aurora
-  PostgreSQL IAM authentication are supported.
-- `garvw/sab-query-service:0.1.0` serves read-only MCP tools over stdio or
-  Streamable HTTP. It can inspect and audit committed datasets, search text
-  literally or semantically, find and aggregate structured rows, and run
-  bounded read-only SQL.
+## Why this exists
 
-The services are separate and can run independently. The dataset engine
-provides a simple HTML workspace UI and HTTP API for status, reconciliation,
-and indexing jobs. Query-service does not index, change, or repair data and
-does not host a chat model; the MCP client supplies the model that chooses
-tools. Both services use S3 for committed dataset storage, and semantic search
-requires an OpenAI-compatible embedding endpoint serving the same model used
-at indexing time. Changing embedding models requires reindexing.
+I wanted a way to ask useful questions about documents and database exports
+using infrastructure I control. Sab writes the index to an S3 bucket I
+choose, then exposes a small set of read-only tools to an MCP client. The
+client brings the chat model; Sab doesn’t host one.
 
-This is an initial release: source connectors are PostgreSQL and S3; query SQL
-runs over committed chunks and is capped at 100 result rows. Sab is not a
-general database proxy, arbitrary S3 query interface, or write-capable SQL
-service. See the service READMEs for configuration and operational details.
-The root Compose stack defaults to the matching 0.1.0 images; set
-`DATASET_ENGINE_IMAGE` or `QUERY_SERVICE_IMAGE` to override them.
+## What it does
 
-See [CHANGELOG.md](CHANGELOG.md) for the v0.1.0 release notes.
-Maintainers can find Docker Hub setup and release steps in
-[docs/releasing.md](docs/releasing.md).
+Sab has two services:
 
-## Quickstart: both services on one machine
+- **dataset-engine** reads PostgreSQL tables and objects in S3, extracts and
+  chunks their contents, creates embeddings, and writes a committed dataset
+  back to S3. It includes a small web UI and HTTP API for workspace status,
+  change previews, indexing jobs, and progress.
+- **query-service** reads the committed dataset and exposes MCP tools to
+  inspect and audit it, search text, find structured rows, calculate
+  aggregates, and run bounded read-only SQL.
+
+S3 inputs support CSV, XLSX/XLSM, PDF, DOCX, Markdown, and plain text.
+PostgreSQL password authentication and Aurora PostgreSQL IAM authentication
+are supported. Both services use the same `workspace.yaml`; the query service
+only reads committed data, while the dataset engine writes new commits.
+
+## How to use
+
+You need Docker Compose, an AWS identity that can access your source and
+target buckets, and an OpenAI-compatible embeddings endpoint serving the model
+configured in the workspace. For a local Ollama endpoint, it must be
+reachable from the containers; for a GPU setup, Compose can start vLLM.
+
+Start with the example workspace and edit the dataset name, target bucket,
+sources, credentials, and embedding model:
 
 ```sh
-cp .env.example .env                       # future glue only; works empty
-# edit dataset-engine/config/workspace.yaml — the single central config
-docker compose up -d                       # dataset-engine :8000, query MCP :8080
-docker compose --profile gpu up -d         # replaces host Ollama with vLLM bge-m3
+cp .env.example .env
+cp dataset-engine/config/workspace.example.yaml dataset-engine/config/workspace.yaml
+# Edit dataset-engine/config/workspace.yaml
+docker compose pull
+docker compose up -d
 ```
 
-- One workspace.yaml drives both sides: mounted read-only into both
-  containers. dataset-engine indexes the `dataset`/`target`/`sources`
-  sections; query-service serves the committed dataset from the same file.
-- One embedding endpoint drives both indexing and semantic_search: the
-  `embeddings:` section in workspace.yaml (Compose overrides for containers,
-  `--profile gpu` overrides for vLLM; env only when you want it).
-- `.env` is deployment glue only (URL overrides, user/value config does not
-  belong there) and can stay empty in the common case.
+The services bind to localhost by default. The dataset engine UI and API are
+at `http://127.0.0.1:8000`; query-service exposes MCP over Streamable HTTP at
+`http://127.0.0.1:8080/mcp`. Connect your MCP host to that endpoint. To use
+the bundled vLLM embedding service instead of host Ollama, set
+`SAB_EMBED_BASE_URL=http://vllm:8000/v1` in `.env` and start the GPU profile:
 
-MCP access to query-service is Streamable HTTP on port 8080 by
-default (`SAB_MCP_TRANSPORT`); each image also runs standalone — see
-`dataset-engine/README.md` and `query-service/README.md`.
+```sh
+docker compose --profile gpu up -d
+```
+
+The model served for embeddings must match the model used at indexing time.
+Changing it requires reindexing. See [dataset-engine](dataset-engine/README.md)
+and [query-service](query-service/README.md) for configuration, AWS access,
+embedding setup, and standalone Docker instructions.
+
+During indexing and semantic search, text is sent to the embedding endpoint
+you configure. Search results are returned to your MCP host, which may send
+them to its chat model. Choose endpoints and MCP hosts according to your data
+handling requirements.
+
+## What it won’t do
+
+Sab is an index and a set of data tools, not a chat application. It doesn’t
+host an LLM, ingest arbitrary source types, answer from uncommitted indexing
+work, or modify data through query-service. SQL can only read committed
+chunks and returns at most 100 rows; it isn’t a general database proxy or an
+arbitrary S3 query interface. Search quality depends on the source data and,
+for semantic search, the embedding model and endpoint you configure.
+
+## How it works
+
+The dataset engine reads the configured PostgreSQL tables and S3 objects,
+extracts text and structured rows, and writes chunks, identifiers, manifests,
+and job receipts to the target S3 dataset. Query-service checks those commit
+records and only searches data that belongs to the committed index. Its MCP
+tools return bounded results with source references so the MCP host can show
+where an answer came from.
+
+The two containers are published as `garvw/sab-dataset-engine:0.1.0` and
+`garvw/sab-query-service:0.1.0`. The root Compose stack uses these matching
+images by default. See [CHANGELOG.md](CHANGELOG.md) for release notes and
+[docs/releasing.md](docs/releasing.md) for maintainer release steps.
