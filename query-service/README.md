@@ -95,14 +95,16 @@ subprocess. Containerized deployments set `SAB_MCP_TRANSPORT=streamable-http`
 ## Docker
 
 ```sh
-docker build -t garvw/sab-query-service:<tag> .
+docker pull garvw/sab-query-service:0.1.0
+# Or build from source:
+docker build -t garvw/sab-query-service:local .
 docker run --rm -p 8080:8080 \
   -e AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / instance role \
   -e SAB_WORKSPACE=/app/config/workspace.yaml \
   -v /path/to/workspace.yaml:/app/config/workspace.yaml:ro \
   -e SAB_EMBED_BASE_URL=http://host.docker.internal:8001/v1 \
   -e SAB_MCP_TRANSPORT=streamable-http \
-  garvw/sab-query-service:<tag>
+  garvw/sab-query-service:0.1.0
 ```
 
 Without `SAB_WORKSPACE`, a bare container uses `SAB_DATASET_BUCKET`

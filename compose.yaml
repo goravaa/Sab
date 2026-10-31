@@ -17,7 +17,7 @@ include:
 
 services:
   query-service:
-    image: ${QUERY_SERVICE_IMAGE:-garvw/sab-query-service:2026.10.27}
+    image: ${QUERY_SERVICE_IMAGE:-garvw/sab-query-service:0.1.0}
     restart: unless-stopped
     ports:
       - "${QUERY_SERVICE_BIND:-127.0.0.1}:${QUERY_SERVICE_PORT:-8080}:8080"

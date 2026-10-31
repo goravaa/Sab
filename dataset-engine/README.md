@@ -12,7 +12,7 @@ uvicorn api.app:app --host 127.0.0.1 --port 8000
 
 ### Docker
 
-The published image is `garvw/sab-dataset-engine`. From this directory,
+The v0.1.0 image is `garvw/sab-dataset-engine:0.1.0`. From this directory,
 create `config/workspace.yaml` and start the dataset engine and vLLM GPU
 embedding service with Docker Compose:
 
