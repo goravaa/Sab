@@ -92,3 +92,7 @@ The two containers are published as `garvw/sab-dataset-engine:0.1.0` and
 `garvw/sab-query-service:0.1.0`. The root Compose stack uses these matching
 images by default. See [CHANGELOG.md](CHANGELOG.md) for release notes and
 [docs/releasing.md](docs/releasing.md) for maintainer release steps.
+
+## License
+
+Sab is licensed under the [MIT License](LICENSE).
